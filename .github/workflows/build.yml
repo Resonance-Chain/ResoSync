@@ -25,8 +25,13 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - run: pip install -r requirements.txt pytest pytest-github-actions-annotate-failures
-      - run: python -m pytest -v tests
+      - run: pip install -r requirements.txt pytest pytest-timeout pytest-github-actions-annotate-failures
+      - run: python -m pytest -v --timeout=600 tests
+        env:
+          # le simulazioni sono lente sul disco dei runner Windows: lì ne bastano poche
+          SIM_SEEDS: ${{ runner.os == 'Windows' && '3' || '8' }}
+          SIM_SEEDS_MULTI: ${{ runner.os == 'Windows' && '2' || '6' }}
+          SIM_SEEDS_LONG: ${{ runner.os == 'Windows' && '1' || '2' }}
 
   windows:
     needs: test
