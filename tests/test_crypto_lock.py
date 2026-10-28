@@ -55,7 +55,8 @@ def test_two_pcs_encrypted(tmp_path):
     assert a.sync_game(ga)["up"] == 1
     assert b.sync_game(gb)["down"] == 1
     assert Path(gb.path, "slot.sav").read_bytes() == b"progressi"
-    assert b"progressi" not in (tmp_path / "cloud/g/files/slot.sav").read_bytes()
+    blobs = list((tmp_path / "cloud/g/blobs/slot.sav").iterdir())
+    assert len(blobs) == 1 and b"progressi" not in blobs[0].read_bytes()
 
 
 def test_lock(tmp_path):

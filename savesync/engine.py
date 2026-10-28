@@ -55,6 +55,7 @@ class SyncEngine:
         self.lock = threading.Lock()
         self._hash_cache = {}  # path -> (size, mtime_ns, hash)
         self._registered = set()
+        self._unreadable = {}  # game_id -> file presenti ma bloccati in questo giro
 
     # ---------- chiavi remote ----------
     @staticmethod
@@ -67,7 +68,18 @@ class SyncEngine:
 
     @staticmethod
     def _k_versions(gid, rel):
+        """Versioni nel formato della 0.2.0 (solo lettura, per i ripristini)."""
         return f"{gid}/versions/{rel}/"
+
+    @staticmethod
+    def _k_blobs(gid, rel):
+        """Dalla 0.3.0 ogni contenuto è un file immutabile <data>__<pc>__<hash>: due PC non
+        possono mai sovrascriversi a vicenda (con le cartelle cloud vince l'ultimo arrivato,
+        file per file) e le versioni vecchie restano lì senza copiarle."""
+        return f"{gid}/blobs/{rel}/"
+
+    def _device_tag(self):
+        return re.sub(r"[^\w.-]+", "_", self.settings.device_name) or "pc"
 
     # ---------- registro giochi sul cloud ----------
     def cloud_games(self) -> dict:
@@ -138,9 +150,16 @@ class SyncEngine:
 
     def _load_state(self, gid) -> dict:
         try:
-            return json.loads(self._state_file(gid).read_text())
+            state = json.loads(self._state_file(gid).read_text())
         except (OSError, ValueError):
-            return {"base": {}}  # primo avvio o file rovinato: si riparte dal confronto pieno
+            state = {}  # primo avvio o file rovinato: si riparte dal confronto pieno
+        state.setdefault("base", {})
+        state.setdefault("mtimes", {})  # data del salvataggio sincronizzato, per file
+        return state
+
+    def reset_state(self, gid) -> None:
+        """Da chiamare quando cambia la cartella di un gioco: la base vecchia non vale più."""
+        self._state_file(gid).unlink(missing_ok=True)
 
     def _save_state(self, gid, state) -> None:
         p = self._state_file(gid)
@@ -169,6 +188,7 @@ class SyncEngine:
     def scan_local(self, game) -> dict:
         root = Path(game.path)
         out = {}
+        unreadable = self._unreadable[game.id] = set()
         for dirpath, dirs, files in os.walk(root):
             for f in files:
                 p = Path(dirpath, f)
@@ -179,6 +199,8 @@ class SyncEngine:
                     st = p.stat()
                     out[rel] = {"hash": self._hash(p, st), "mtime": st.st_mtime, "size": st.st_size}
                 except OSError as e:  # file bloccato dal gioco mentre scrive: riproviamo dopo
+                    # NON è un file cancellato: va escluso dal confronto di questo giro
+                    unreadable.add(rel)
                     self.log(f"[{game.name}] salto {rel} per ora: {e}")
         return out
 
@@ -188,13 +210,22 @@ class SyncEngine:
             Path(game.path).mkdir(parents=True, exist_ok=True)  # PC nuovo: cartella da creare
             self.register_game(game)
             local = self.scan_local(game)
+            skip = self._unreadable.get(game.id, set())
             manifest = self.load_manifest(game.id)
-            if not self._differs(local, manifest):
+            if not self._differs(local, manifest, skip):
                 # Tutto allineato: niente lock, solo aggiornare la base locale
                 state = self._load_state(game.id)
-                state["base"] = {r: e["hash"] for r, e in local.items()}
+                for r in set(state["base"]) - set(local) - skip:
+                    state["base"].pop(r, None)
+                    state["mtimes"].pop(r, None)
+                for r, e in local.items():
+                    if state["base"].get(r) != e["hash"]:
+                        state["mtimes"][r] = e["mtime"]
+                    state["base"][r] = e["hash"]
                 self._save_state(game.id, state)
-                return {"up": 0, "down": 0, "conflicts": 0, "deleted": 0, "errors": 0}
+                stats = {"up": 0, "down": 0, "conflicts": 0, "deleted": 0, "errors": 0}
+                stats["errors"] = len(skip)
+                return stats
             token = self.acquire_lock(game.id, wait_lock)
             try:
                 manifest = self.load_manifest(game.id)  # può essere cambiato mentre aspettavamo
@@ -203,26 +234,39 @@ class SyncEngine:
                 self.release_lock(game.id, token)
 
     @staticmethod
-    def _differs(local, manifest) -> bool:
-        remote = {r: e["hash"] for r, e in manifest["files"].items() if not e.get("deleted")}
+    def _differs(local, manifest, skip=frozenset()) -> bool:
+        remote = {r: e["hash"] for r, e in manifest["files"].items()
+                  if not e.get("deleted") and r not in skip}
         return {r: e["hash"] for r, e in local.items()} != remote
 
     def _sync_game(self, game, local, manifest) -> dict:
         remote = {r: e for r, e in manifest["files"].items() if not e.get("deleted")}
         state = self._load_state(game.id)
-        base = state["base"]
+        base, mtimes = state["base"], state["mtimes"]
         changes = {}
-        stats = {"up": 0, "down": 0, "conflicts": 0, "deleted": 0, "errors": 0}
+        skip = self._unreadable.get(game.id, set())
+        stats = {"up": 0, "down": 0, "conflicts": 0, "deleted": 0, "errors": len(skip)}
         propagate = self.settings.propagate_deletes
+        if propagate and base and not local and not skip:
+            # Sparito tutto in un colpo (cartella spostata, disco scollegato, gioco
+            # reinstallato): quasi certamente non è voluto, quindi non cancello il cloud.
+            self.log(f"[{game.name}] la cartella è vuota: non propago le cancellazioni, "
+                     f"riscarico dal cloud")
+            propagate = False
 
         for rel in sorted(set(local) | set(remote) | set(base)):
+            if rel in skip:
+                continue
             L = local.get(rel, {}).get("hash")
             R = remote.get(rel, {}).get("hash")
             B = base.get(rel)
             if L == R:
                 if L is None:
                     base.pop(rel, None)
+                    mtimes.pop(rel, None)
                 else:
+                    if B != L:
+                        mtimes[rel] = local[rel]["mtime"]
                     base[rel] = L
                 continue
 
@@ -230,32 +274,50 @@ class SyncEngine:
                 local_changed, remote_changed = L != B, R != B
                 if local_changed and not remote_changed:
                     if L is not None:
-                        self._upload(game, rel, rel in remote, changes, base); stats["up"] += 1
+                        self._upload(game, rel, rel in remote, changes, base, mtimes, remote)
+                        stats["up"] += 1
                     elif propagate:
-                        self._delete_remote(game, rel, changes, base); stats["deleted"] += 1
+                        self._delete_remote(game, rel, changes, base, remote)
+                        mtimes.pop(rel, None)
+                        stats["deleted"] += 1
                     else:  # cancellato in locale ma non propaghiamo: lo rimettiamo
-                        self._download(game, rel, remote[rel], base); stats["down"] += 1
+                        self._download(game, rel, remote[rel], base, mtimes); stats["down"] += 1
                 elif remote_changed and not local_changed:
-                    if R is not None:
-                        self._download(game, rel, remote[rel], base); stats["down"] += 1
+                    if R is not None and L is not None and \
+                            remote[rel].get("mtime", 0) < mtimes.get(rel, 0) - 0.001:
+                        # Il cloud propone un salvataggio PIÙ VECCHIO di quello già
+                        # sincronizzato: tipico delle cartelle cloud (Proton Drive, OneDrive,
+                        # Dropbox) quando un manifest vecchio arriva in ritardo e
+                        # sovrascrive quello nuovo. Non si torna indietro: ricarico il mio.
+                        self.log(f"[{game.name}] sul cloud c'è una versione più vecchia di "
+                                 f"{rel}: ricarico quella più recente")
+                        self._upload(game, rel, True, changes, base, mtimes, remote)
+                        stats["up"] += 1
+                    elif R is not None:
+                        self._download(game, rel, remote[rel], base, mtimes); stats["down"] += 1
                     elif propagate:
-                        self._delete_local(game, rel, base); stats["deleted"] += 1
+                        self._delete_local(game, rel, base)
+                        mtimes.pop(rel, None)
+                        stats["deleted"] += 1
                     else:
-                        self._upload(game, rel, False, changes, base); stats["up"] += 1
+                        self._upload(game, rel, False, changes, base, mtimes, remote)
+                        stats["up"] += 1
                 else:
                     stats["conflicts"] += 1
                     if L is None:
-                        self._download(game, rel, remote[rel], base); stats["down"] += 1
+                        self._download(game, rel, remote[rel], base, mtimes); stats["down"] += 1
                     elif R is None:
-                        self._upload(game, rel, False, changes, base); stats["up"] += 1
+                        self._upload(game, rel, False, changes, base, mtimes, remote)
+                        stats["up"] += 1
                     elif local[rel]["mtime"] >= remote[rel]["mtime"]:
                         self.log(f"[{game.name}] CONFLITTO su {rel}: vince il locale (più recente), "
                                  f"quello del cloud resta nelle versioni")
-                        self._upload(game, rel, True, changes, base); stats["up"] += 1
+                        self._upload(game, rel, True, changes, base, mtimes, remote)
+                        stats["up"] += 1
                     else:
                         self.log(f"[{game.name}] CONFLITTO su {rel}: vince il cloud "
                                  f"({remote[rel].get('device')}), il locale va nei backup")
-                        self._download(game, rel, remote[rel], base); stats["down"] += 1
+                        self._download(game, rel, remote[rel], base, mtimes); stats["down"] += 1
             except Exception as e:
                 stats["errors"] += 1
                 self.log(f"[{game.name}] errore su {rel}: {e}")
@@ -265,44 +327,66 @@ class SyncEngine:
         self._save_state(game.id, state)
         return stats
 
-    def _upload(self, game, rel, overwrite, changes, base):
+    def _upload(self, game, rel, overwrite, changes, base, mtimes, remote):
         src = Path(game.path, rel)
-        key = self._k_file(game.id, rel)
+        prefix = self._k_blobs(game.id, rel)
         # Fotografia del file: se il gioco lo riscrive mentre carichiamo non mandiamo roba a metà
         with tempfile.TemporaryDirectory() as td:
             snap = Path(td, "snap")
             shutil.copy2(src, snap)
             st = snap.stat()
             h = sha256_file(snap)
-            if overwrite:
-                self._version_remote(game, rel)
-            self.backend.upload_file(key, snap)
-        changes[rel] = {"hash": h, "mtime": st.st_mtime, "size": st.st_size,
+            if rel in remote and not remote[rel].get("blob"):
+                self._migrate_legacy(game, rel, remote[rel])
+            existing = sorted(self.backend.list(prefix))
+            same = [k for k in existing if k.endswith("__" + h[:16])]
+            if same:
+                blob = same[-1]  # stesso contenuto già sul cloud (es. ripristino)
+            else:
+                # hash corto nel nome: i percorsi Windows hanno un limite di 260 caratteri
+                # (il contenuto viene comunque verificato con l'hash intero al download)
+                blob = f"{prefix}{_stamp()}__{self._device_tag()}__{h[:16]}"
+                self.backend.upload_file(blob, snap)
+                existing.append(blob)
+        changes[rel] = {"hash": h, "mtime": st.st_mtime, "size": st.st_size, "blob": blob,
                         "device": self.settings.device_name, "time": time.time()}
+        self._prune(existing, keep=blob)
         base[rel] = h
+        mtimes[rel] = st.st_mtime
         self.log(f"[{game.name}] ↑ {rel}")
 
-    def _download(self, game, rel, entry, base, key=None):
+    def _download(self, game, rel, entry, base, mtimes=None, key=None):
         dst = Path(game.path, rel)
         dst.parent.mkdir(parents=True, exist_ok=True)
-        if dst.exists():
-            self._backup_local(game, rel)
         tmp = dst.with_name(dst.name + ".savesync-tmp")
-        self.backend.download_file(key or self._k_file(game.id, rel), tmp)
-        h = sha256_file(tmp)
-        if key is None and h != entry["hash"]:
+        # Prima scarico e verifico, POI faccio il backup: se il download fallisce non
+        # riempio i backup di copie identiche (che spingerebbero fuori la cronologia vera)
+        try:
+            src = key or (entry or {}).get("blob") or self._k_file(game.id, rel)
+            try:
+                self.backend.download_file(src, tmp)
+            except FileNotFoundError:
+                raise IOError("file non ancora arrivato sul cloud, riprovo più tardi")
+            h = sha256_file(tmp)
+            if key is None and h != entry["hash"]:
+                raise IOError("hash non corrisponde (file sul cloud ancora in caricamento?)")
+            if dst.exists():
+                self._backup_local(game, rel)
+            replace_retry(tmp, dst)
+        finally:
             tmp.unlink(missing_ok=True)
-            raise IOError("hash non corrisponde (file sul cloud ancora in caricamento?)")
-        replace_retry(tmp, dst)
         if entry and entry.get("mtime"):
             os.utime(dst, (entry["mtime"], entry["mtime"]))  # alcuni giochi guardano la data
         if key is None:
             base[rel] = h
+            if mtimes is not None:
+                mtimes[rel] = entry.get("mtime", 0)
         self.log(f"[{game.name}] ↓ {rel}")
 
-    def _delete_remote(self, game, rel, changes, base):
-        self._version_remote(game, rel)
-        self.backend.delete(self._k_file(game.id, rel))
+    def _delete_remote(self, game, rel, changes, base, remote):
+        # il blob resta come versione: basta toglierlo dal manifest
+        if not remote.get(rel, {}).get("blob"):
+            self._migrate_legacy(game, rel, remote.get(rel, {}))
         changes[rel] = {"deleted": True, "device": self.settings.device_name, "time": time.time()}
         base.pop(rel, None)
         self.log(f"[{game.name}] ✕ cloud {rel}")
@@ -314,22 +398,39 @@ class SyncEngine:
         self.log(f"[{game.name}] ✕ locale {rel}")
 
     # ---------- versioni e backup ----------
-    def _version_remote(self, game, rel):
-        key = self._k_file(game.id, rel)
-        prefix = self._k_versions(game.id, rel)
+    def _migrate_legacy(self, game, rel, entry):
+        """File caricato dalla 0.2.0 in files/<rel>: lo sposto tra i blob prima di
+        sostituirlo, così resta tra le versioni."""
+        legacy = self._k_file(game.id, rel)
+        h = entry.get("hash")
+        if not h:
+            return
+        device = re.sub(r"[^\w.-]+", "_", entry.get("device", "")) or "pc"
         try:
-            device = re.sub(r"[^\w.-]+", "_", self.settings.device_name) or "pc"
-            self.backend.copy(key, f"{prefix}{_stamp()}__{device}")
+            self.backend.copy(legacy,
+                              f"{self._k_blobs(game.id, rel)}{_stamp()}__{device}__{h[:16]}")
+            self.backend.delete(legacy)
         except Exception:
-            return  # niente da versionare
-        versions = sorted(self.backend.list(prefix))
-        for old in versions[:-self.settings.max_versions] if self.settings.max_versions > 0 else []:
-            self.backend.delete(old)
+            pass  # file vecchio già sparito: niente da migrare
+
+    def _prune(self, blobs, keep):
+        """Tiene il blob attuale + le ultime `max_versions` versioni."""
+        blobs = sorted(set(blobs))
+        old = [b for b in blobs if b != keep]
+        for b in old[:-self.settings.max_versions] if self.settings.max_versions > 0 else []:
+            try:
+                self.backend.delete(b)
+            except Exception:
+                pass
 
     def _backup_local(self, game, rel):
         src = Path(game.path, rel)
         folder = self.app_dir / "backups" / game.id / rel
         folder.mkdir(parents=True, exist_ok=True)
+        existing = sorted(folder.iterdir())
+        if existing and existing[-1].stat().st_size == src.stat().st_size and \
+                sha256_file(existing[-1]) == sha256_file(src):
+            return  # identico all'ultimo backup
         dst = folder / _stamp()
         while dst.exists():
             dst = dst.with_name(dst.name + "_")
@@ -345,8 +446,11 @@ class SyncEngine:
     def list_versions(self, game, rel) -> list:
         """[(etichetta, origine, chiave/percorso)] dal più recente: versioni cloud + backup locali."""
         out = []
-        for k in self.backend.list(self._k_versions(game.id, rel)):
+        keys = self.backend.list(self._k_blobs(game.id, rel)) + \
+            self.backend.list(self._k_versions(game.id, rel))
+        for k in keys:
             stamp, _, device = k.rsplit("/", 1)[-1].partition("__")
+            device = device.split("__")[0]
             out.append((stamp, f"cloud ({device})", k))
         local_dir = self.app_dir / "backups" / game.id / rel
         if local_dir.exists():

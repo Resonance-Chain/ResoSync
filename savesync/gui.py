@@ -345,6 +345,11 @@ class App(tk.Tk):
             self.cfg.games[self.cfg.games.index(old)] = game
         else:
             self.cfg.games.append(game)
+        if self.engine and (old is None or os.path.normcase(os.path.normpath(old.path)) !=
+                            os.path.normcase(os.path.normpath(game.path))):
+            # Cartella nuova (o gioco riaggiunto): lo stato della vecchia non vale più,
+            # sennò una cartella vuota sembrerebbe "ho cancellato tutto"
+            self.engine.reset_state(game.id)
         self.cfg.save()
         if self.service:
             self.service.rewatch()
@@ -963,6 +968,16 @@ class SettingsDialog(tk.Toplevel):
         except ValueError:
             messagebox.showerror("Impostazioni", "I campi numerici devono contenere numeri.",
                                  parent=self)
+            return
+        limits = {"poll_interval": (10, "controllo del cloud: almeno 10 secondi"),
+                  "debounce_seconds": (1, "attesa dopo una modifica: almeno 1 secondo"),
+                  "max_versions": (1, "versioni da tenere: almeno 1")}
+        for k, (minimum, msg) in limits.items():
+            if new[k] < minimum:
+                messagebox.showerror("Impostazioni", msg.capitalize() + ".", parent=self)
+                return
+        if not new["device_name"]:
+            messagebox.showerror("Impostazioni", "Dai un nome a questo PC.", parent=self)
             return
         if new["encrypt"]:
             if len(new["passphrase"]) < 8:

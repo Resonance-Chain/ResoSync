@@ -48,8 +48,14 @@ class FolderBackend(Backend):
     Syncthing o un disco di rete e ci pensa il loro client a mandarla online."""
 
     def __init__(self, root: str):
+        if not str(root).strip():
+            raise ValueError("Cartella del cloud non impostata")
         self.root = Path(root)
-        self.root.mkdir(parents=True, exist_ok=True)
+        if not self.root.exists() and not self.root.parent.exists():
+            # Es. Proton Drive/OneDrive non montato o disco di rete scollegato: NON creo
+            # una cartella "finta" in locale, sennò si sincronizzerebbe nel vuoto
+            raise FileNotFoundError(f"Cartella del cloud non disponibile: {self.root.parent}")
+        self.root.mkdir(exist_ok=True)
 
     def _p(self, key: str) -> Path:
         return self.root.joinpath(*key.split("/"))

@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       release:
-        description: "Versione da pubblicare come Release (es. 0.2.0). Vuoto = solo build"
+        description: "Versione da pubblicare come Release (es. 0.3.0). Vuoto = solo build"
         required: false
         default: ""
 
@@ -51,7 +51,7 @@ jobs:
       - name: Installer
         shell: pwsh
         run: |
-          $env:SAVESYNC_VERSION = "${{ github.event.release.tag_name || inputs.release || '0.2.0' }}".TrimStart("v")
+          $env:SAVESYNC_VERSION = "${{ github.event.release.tag_name || inputs.release || '0.3.0' }}".TrimStart("v")
           if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" installer.iss
       - run: Compress-Archive -Path dist\SaveSync -DestinationPath dist\SaveSync-portable.zip
@@ -68,6 +68,7 @@ jobs:
           tag_name: ${{ github.event.release.tag_name || format('v{0}', inputs.release) }}
           name: SaveSync ${{ github.event.release.tag_name || format('v{0}', inputs.release) }}
           target_commitish: ${{ github.sha }}
+
           body: |
             **Download:** `SaveSync-Setup-*.exe` (installer, consigliato) oppure `SaveSync-portable.zip`.
 

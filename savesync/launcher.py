@@ -133,6 +133,10 @@ def run(game_ref: str, command: list) -> int:
     cfg = Config.load()
     ui = Splash()
     game = cfg.find_game(game_ref)
+    if game and not cfg.is_configured():
+        messagebox.showwarning("SaveSync", "Cloud non configurato: avvio il gioco senza "
+                               "sincronizzare. Apri SaveSync e completa le impostazioni.")
+        game = None
     if not game:
         messagebox.showerror("SaveSync", f"Gioco '{game_ref}' non trovato nella configurazione.")
         if command:  # non impedire di giocare per colpa nostra

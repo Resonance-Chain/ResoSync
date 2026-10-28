@@ -64,6 +64,7 @@ class SyncService:
         self._stop = threading.Event()
         self._observer = None
         self._snapshots = {}
+        self._watched = set()
         self._thread = threading.Thread(target=self._loop, daemon=True)
 
     # ---------- API ----------
@@ -106,10 +107,12 @@ class SyncService:
         if self._observer:
             self._observer.stop()
         self._observer = Observer()
+        self._watched = set()
         for g in self.config.games:
             if g.enabled and Path(g.path).is_dir():
                 try:
                     self._observer.schedule(_Handler(self, g.id), g.path, recursive=True)
+                    self._watched.add(g.id)
                 except OSError as e:
                     self.on_event("log", f"[{g.name}] impossibile osservare la cartella: {e}")
         self._observer.daemon = True
@@ -198,6 +201,8 @@ class SyncService:
             self.on_event("log", f"[{game.name}] sync fallita: {e}")
             self.on_event("error", e)
             return
+        if HAVE_WATCHDOG and gid not in self._watched and Path(game.path).is_dir():
+            self._watch()  # la cartella è appena stata creata dalla prima sync
         parts = [f"↑{st['up']}" if st["up"] else "", f"↓{st['down']}" if st["down"] else "",
                  f"⚠{st['conflicts']} conflitti" if st["conflicts"] else "",
                  f"{st['errors']} errori" if st["errors"] else ""]

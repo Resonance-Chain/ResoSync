@@ -28,7 +28,8 @@ def test_sync_only_after_game_exit(tmp_path, monkeypatch):
     eng = SyncEngine(cfg.settings, FolderBackend(tmp_path / "cloud"), cfg.app_dir,
                      log=lambda m: events.append(m))
     svc = service.SyncService(cfg, eng, lambda *a: events.append(a))
-    cloud_file = tmp_path / "cloud/g/files/slot.sav"
+    blob_dir = tmp_path / "cloud/g/blobs/slot.sav"
+    uploaded = lambda: blob_dir.exists() and any(blob_dir.iterdir())
     try:
         svc.start()
         running.add("game")
@@ -37,9 +38,9 @@ def test_sync_only_after_game_exit(tmp_path, monkeypatch):
         (saves / "slot.sav").write_text("in partita")
         svc.notify("g")
         time.sleep(2)
-        assert not cloud_file.exists(), "non deve caricare mentre il gioco è aperto"
+        assert not uploaded(), "non deve caricare mentre il gioco è aperto"
         running.clear()
-        assert wait_until(cloud_file.exists), "deve caricare appena il gioco si chiude"
+        assert wait_until(uploaded), "deve caricare appena il gioco si chiude"
     finally:
         svc.stop()
     assert any("gioco chiuso" in str(e) for e in events)

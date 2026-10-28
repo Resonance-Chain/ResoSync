@@ -94,22 +94,27 @@ dalla lista di quelli aperti.
 - **Confronto a 3 vie**: hash locale, hash sul cloud, hash dell'ultima sync. Così si capisce chi
   ha cambiato cosa senza fidarsi solo delle date.
 - **Conflitti** (modificato su due PC): vince il più recente, l'altro non si perde mai.
-- **Versioni**: prima di sovrascrivere si tiene una copia (default 10 per file), sul cloud e in
-  locale (`%USERPROFILE%\.savesync\backups`). Da *Ripristina versione* torni indietro.
+- **Versioni**: ogni salvataggio caricato è un file a sé che non viene mai sovrascritto
+  (default: l'attuale + 10 precedenti per file), più copie locali in
+  `%USERPROFILE%\.savesync\backups`. Da *Ripristina versione* torni indietro.
+- **Mai all'indietro**: se il cloud propone un salvataggio più vecchio di quello già
+  sincronizzato (succede con le cartelle cloud quando un file arriva in ritardo), SaveSync non
+  lo scarica e ricarica il suo.
 - **Lock**: prima di scrivere, un PC prende un lock sul cloud (scade dopo 2 minuti se il PC si
   pianta). Gli altri aspettano e riprovano. Con l'opzione "Cartella" il lock vale solo quando il
-  programma del cloud ha già sincronizzato, quindi è meno affidabile delle API dirette.
+  programma del cloud ha già sincronizzato, per questo valgono anche le due regole sopra.
 - **Cancellazioni**: di default non vengono propagate (un file cancellato per sbaglio torna).
+  Anche se le attivi, una cartella che si svuota di colpo non cancella niente dal cloud.
 
 Struttura sul cloud:
 
 ```
-games.json                      elenco giochi
-crypto.json                     solo se la cifratura è attiva (sale + verifica passphrase)
-<gioco>/manifest.json           hash, data, PC di ogni file
-<gioco>/files/...               salvataggi attuali
-<gioco>/versions/<file>/...     versioni precedenti
-<gioco>/lock.json               lock temporaneo durante una sync
+games.json                              elenco giochi
+crypto.json                             solo con la cifratura (sale + verifica passphrase)
+<gioco>/manifest.json                   per ogni file: hash, data, PC, blob attuale
+<gioco>/blobs/<file>/<data>__<pc>__<hash>   contenuti (attuale + versioni), mai sovrascritti
+<gioco>/lock.json                       lock temporaneo durante una sync
+<gioco>/files/, <gioco>/versions/       formato della 0.2.0, convertito alla prima modifica
 ```
 
 Dati locali: `%USERPROFILE%\.savesync` (configurazione, stato, backup, log del launcher).
