@@ -25,6 +25,8 @@ jobs:
   windows:
     needs: test
     runs-on: windows-latest
+    permissions:
+      contents: write  # serve per creare la Release quando si pubblica un tag
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
