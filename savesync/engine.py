@@ -254,6 +254,11 @@ class SyncEngine:
         skip = self._unreadable.get(game.id, set())
         stats = {"up": 0, "down": 0, "conflicts": 0, "deleted": 0, "errors": len(skip)}
         propagate = self.settings.propagate_deletes
+        if propagate and base and not manifest["files"]:
+            # Cloud completamente vuoto (cloud nuovo o cartella cloud cambiata): non vuol dire
+            # che qualcuno abbia cancellato i salvataggi. Carico, non cancello.
+            self.log(f"[{game.name}] cloud vuoto: carico i salvataggi invece di cancellarli")
+            propagate = False
         if propagate and base and not local and not skip:
             # Sparito tutto in un colpo (cartella spostata, disco scollegato, gioco
             # reinstallato): quasi certamente non è voluto, quindi non cancello il cloud.

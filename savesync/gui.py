@@ -45,6 +45,13 @@ class App(tk.Tk):
         self.tray = None
         self.instance = instance
         self._told_tray = False
+        # Linux/Steam Deck: il servizio in background si ferma mentre la finestra è aperta
+        try:
+            if system.service_supported() and system.pause_service():
+                self.after(500, lambda: self._log("Servizio in background in pausa finché la "
+                                                  "finestra è aperta"))
+        except Exception:
+            pass
         try:
             from PIL import ImageTk
             self._icon = ImageTk.PhotoImage(system.icon_image(64))
@@ -383,6 +390,10 @@ class App(tk.Tk):
                 pass
         if self.instance:
             self.instance.close()
+        try:
+            system.resume_service()
+        except Exception:
+            pass
         self.destroy()
 
     # ---------- azioni ----------
@@ -904,6 +915,7 @@ class SettingsDialog(tk.Toplevel):
         self.v = {k: (tk.BooleanVar if isinstance(val, bool) else tk.StringVar)(value=val)
                   for k, val in vars(s).items()}
         self.v["autostart"].set(system.is_autostart_enabled())
+        self.bg_service = tk.BooleanVar(value=system.service_installed())
         self.passphrase2 = tk.StringVar(value=s.passphrase)
 
         nb = ttk.Notebook(self)
@@ -981,7 +993,8 @@ class SettingsDialog(tk.Toplevel):
             self.pass_entries.append(e)
         store = ("nel portachiavi di sistema (Gestione credenziali di Windows)"
                  if self.app.cfg.vault.secure else
-                 "in un file locale: il portachiavi di sistema non è disponibile")
+                 "in un file locale leggibile solo dal tuo utente (su Linux e Steam Deck il "
+                 "portachiavi non è attivo in modalità gioco)")
         _hint(f, f"Password e chiavi sono salvate {store}, non in config.json.",
               row=5, column=0, columnspan=2, pady=(12, 0))
         return f
@@ -1025,6 +1038,13 @@ class SettingsDialog(tk.Toplevel):
         ttk.Button(row, text="Apri", command=lambda: system.open_in_file_manager(
             str(self.app.cfg.app_dir))).pack(side="left", padx=6)
 
+        if system.service_supported():
+            ttk.Checkbutton(f, text="Servizio in background: sincronizza sempre, anche in "
+                            "modalità gioco su Steam Deck", variable=self.bg_service).grid(
+                row=10, column=0, sticky="w", pady=(12, 0))
+            _hint(f, "Parte all'accensione senza finestre (systemd). Mentre questa finestra è "
+                     "aperta resta in pausa. Log: savesync.log nella cartella dati.",
+                  row=11, column=0)
         ttk.Separator(f).grid(row=5, column=0, sticky="we", pady=12)
         ttk.Label(f, text=f"Aggiornamenti (versione installata: {__version__})",
                   font=("", 10, "bold")).grid(row=6, column=0, sticky="w")
@@ -1157,8 +1177,13 @@ class SettingsDialog(tk.Toplevel):
                 messagebox.showerror("Impostazioni", "Le due passphrase non coincidono.",
                                      parent=self)
                 return
+        before = self.app.cfg.cloud_identity()
         for k, val in new.items():
             setattr(s, k, val)
+        if self.app.cfg.cloud_identity() != before:
+            # Cloud diverso: lo stato "com'era all'ultima sync" si riferiva al vecchio. Senza
+            # azzerarlo, il cloud nuovo e vuoto sembrerebbe "hanno cancellato tutto".
+            self.app.cfg.reset_all_states()
         if not self.app.cfg.is_configured():
             messagebox.showerror("Impostazioni", "Completa la configurazione del cloud scelto.",
                                  parent=self)
@@ -1166,6 +1191,9 @@ class SettingsDialog(tk.Toplevel):
         try:
             if new["autostart"] != system.is_autostart_enabled():
                 system.set_autostart(new["autostart"])
+            if system.service_supported() and self.bg_service.get() != system.service_installed():
+                system.set_background_service(self.bg_service.get())
+                system.pause_service()  # riparte quando chiudi la finestra
         except OSError as e:
             messagebox.showwarning("Impostazioni", f"Avvio automatico non impostato: {e}",
                                    parent=self)

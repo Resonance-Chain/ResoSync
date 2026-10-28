@@ -4,7 +4,8 @@ Sincronizza i salvataggi dei videogiochi tra più PC passando dal cloud.
 Trova da solo i giochi installati, si accorge quando un gioco salva, carica i salvataggi
 quando chiudi il gioco e li scarica quando lo riapri su un altro PC.
 
-> Prima volta? Segui la guida passo passo: [SETUP.md](SETUP.md)
+> Prima volta? Segui la guida passo passo: [SETUP.md](SETUP.md).
+> Steam Deck / Linux: [STEAMDECK.md](STEAMDECK.md).
 
 ## Installazione su Windows
 

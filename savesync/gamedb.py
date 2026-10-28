@@ -17,7 +17,7 @@ from pathlib import Path
 
 MANIFEST_URL = "https://raw.githubusercontent.com/mtkennerly/ludusavi-manifest/master/data/manifest.yaml"
 MAX_AGE = 7 * 24 * 3600
-DB_FORMAT = 2  # cambia quando cambia cosa teniamo nella cache (forza un nuovo download)
+DB_FORMAT = 3  # cambia quando cambia cosa teniamo nella cache (forza un nuovo download)
 STORE_NAMES = {"steam": "Steam", "epic": "Epic", "gog": "GOG", "uplay": "Ubisoft",
                "origin": "EA"}
 SYSTEM = {"Windows": "windows", "Darwin": "mac"}.get(platform.system(), "linux")
@@ -115,6 +115,9 @@ def compact(raw: dict) -> dict:
             entry["x"] = exes
         if (g.get("steam") or {}).get("id"):
             entry["s"] = g["steam"]["id"]
+        extra = (g.get("id") or {}).get("steamExtra") or []
+        if extra:
+            entry["sx"] = list(extra)
         clouds = sorted(k for k, v in (g.get("cloud") or {}).items() if v is True)
         if clouds:
             entry["c"] = clouds
@@ -170,6 +173,59 @@ def placeholders() -> dict:
             "<xdgConfig>": Path(env("XDG_CONFIG_HOME") or home / ".config"),
         })
     return p
+
+
+def proton_placeholders(pfx: Path) -> dict:
+    """Segnaposto Windows dentro un prefisso Wine/Proton (il finto C: di Steam Deck/Linux)."""
+    users = pfx / "drive_c" / "users"
+    names = [d.name for d in _subdirs(users) if d.name.lower() != "public"]
+    user = "steamuser" if "steamuser" in names else (names[0] if names else "steamuser")
+    home = users / user
+    docs = home / "Documents"
+    if not docs.exists() and (home / "My Documents").exists():
+        docs = home / "My Documents"  # prefissi di Proton vecchi
+    return {"<home>": home, "<osUserName>": user,
+            "<winAppData>": home / "AppData" / "Roaming",
+            "<winLocalAppData>": home / "AppData" / "Local",
+            "<winLocalAppDataLow>": home / "AppData" / "LocalLow",
+            "<winDocuments>": docs, "<winPublic>": users / "Public",
+            "<winProgramData>": pfx / "drive_c" / "ProgramData",
+            "<winDir>": pfx / "drive_c" / "windows"}
+
+
+def steam_app_manifests(lib: Path) -> dict:
+    """{appid: cartella d'installazione} dagli appmanifest_<id>.acf di una libreria Steam."""
+    out = {}
+    for acf in (lib / "steamapps").glob("appmanifest_*.acf"):
+        try:
+            text = acf.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        appid = re.search(r'"appid"\s+"(\d+)"', text)
+        folder = re.search(r'"installdir"\s+"([^"]+)"', text)
+        if appid and folder:
+            out[int(appid.group(1))] = lib / "steamapps" / "common" / folder.group(1)
+    return out
+
+
+def _norm_title(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", name.lower())
+
+
+def heroic_prefixes() -> dict:
+    """{titolo normalizzato: prefisso} per i giochi Epic/GOG installati con Heroic."""
+    home = Path.home()
+    roots = [home / "Games" / "Heroic" / "Prefixes" / "default",
+             home / "Games" / "Heroic" / "Prefixes",
+             home / ".var" / "app" / "com.heroicgameslauncher.hgl" / "data" / "heroic" / "Prefixes"]
+    out = {}
+    for root in roots:
+        for d in _subdirs(root):
+            if (d / "drive_c").is_dir():
+                out.setdefault(_norm_title(d.name), d)
+            elif (d / "pfx" / "drive_c").is_dir():
+                out.setdefault(_norm_title(d.name), d / "pfx")
+    return out
 
 
 def steam_libraries() -> list:
@@ -308,20 +364,55 @@ def _static_prefix(pattern: str) -> str:
     return "/".join(keep)
 
 
+def _match(g, ph, installs, system) -> list:
+    """Percorsi di salvataggio di un gioco che esistono davvero: [(cartella, pattern|None, mtime)]"""
+    matches = []
+    for path, oses in g["f"]:
+        if oses and system not in oses:
+            continue
+        if ("<base>" in path or "<root>" in path or "<game>" in path) and not installs:
+            continue
+        for pattern in _expand(path, ph, installs):
+            prefix = _static_prefix(pattern)
+            if prefix != pattern and not os.path.isdir(prefix):
+                continue
+            for m in (glob.glob(pattern) if prefix != pattern else
+                      ([pattern] if os.path.exists(pattern) else [])):
+                m = os.path.normpath(m)
+                if os.path.isdir(m):
+                    matches.append((m, None, _tree_mtime(m)))
+                else:
+                    # se il manifest dice *.dat teniamo *.dat: così i nuovi slot entrano da soli
+                    last = pattern.rsplit("/", 1)[-1]
+                    fname = last if _MAGIC.search(last) else os.path.basename(m)
+                    matches.append((os.path.dirname(m), fname, _mtime(m)))
+    too_broad = {os.path.normcase(os.path.normpath(str(v)))
+                 for v in ph.values() if isinstance(v, Path)}
+    return [m for m in matches if os.path.normcase(m[0]) not in too_broad]
+
+
 def detect(db: dict, progress=lambda done, total: None) -> list:
+    """Giochi con salvataggi su questo PC. Su Linux/Steam Deck guarda anche dentro i prefissi
+    Proton (steamapps/compatdata/<id Steam>/pfx) e Heroic, usando i percorsi Windows."""
     games = db.get("games", {})
     ph = placeholders()
-    too_broad = {os.path.normcase(str(v)) for v in ph.values() if isinstance(v, Path)}
     libs = steam_libraries()
     installed = {}
     for lib in libs:
-        common = lib / "steamapps" / "common"
-        try:
-            for d in common.iterdir():
-                installed.setdefault(d.name.lower(), []).append(
-                    (str(lib).replace("\\", "/"), str(d).replace("\\", "/"), d.name))
-        except OSError:
-            pass
+        for d in _subdirs(lib / "steamapps" / "common"):
+            installed.setdefault(d.name.lower(), []).append(
+                (str(lib).replace("\\", "/"), str(d).replace("\\", "/"), d.name))
+
+    # Linux / Steam Deck: prefissi Proton per ID Steam, cartelle d'installazione per ID
+    prefixes, app_dirs, heroic = {}, {}, {}
+    if SYSTEM != "windows":
+        for lib in libs:
+            for d in _subdirs(lib / "steamapps" / "compatdata"):
+                if d.name.isdigit() and (d / "pfx" / "drive_c").is_dir():
+                    prefixes.setdefault(int(d.name), (lib, d / "pfx"))
+            for appid, folder in steam_app_manifests(lib).items():
+                app_dirs.setdefault(appid, (lib, folder))
+        heroic = heroic_prefixes()
 
     found = []
     try:
@@ -333,27 +424,25 @@ def detect(db: dict, progress=lambda done, total: None) -> list:
         if i % 500 == 0:
             progress(i, total)
         installs = [t for d in g.get("d", []) for t in installed.get(d.lower(), [])]
-        matches = []  # (folder, pattern o None, mtime)
-        for path, oses in g["f"]:
-            if oses and SYSTEM not in oses:
-                continue
-            if ("<base>" in path or "<root>" in path or "<game>" in path) and not installs:
-                continue
-            for pattern in _expand(path, ph, installs):
-                prefix = _static_prefix(pattern)
-                if prefix != pattern and not os.path.isdir(prefix):
-                    continue
-                for m in (glob.glob(pattern) if prefix != pattern else
-                          ([pattern] if os.path.exists(pattern) else [])):
-                    m = os.path.normpath(m)
-                    if os.path.isdir(m):
-                        matches.append((m, None, _tree_mtime(m)))
-                    else:
-                        # se il manifest dice *.dat teniamo *.dat: così i nuovi slot entrano da soli
-                        last = pattern.rsplit("/", 1)[-1]
-                        fname = last if _MAGIC.search(last) else os.path.basename(m)
-                        matches.append((os.path.dirname(m), fname, _mtime(m)))
-        matches = [m for m in matches if os.path.normcase(m[0]) not in too_broad]
+        matches = _match(g, ph, installs, SYSTEM)
+        install_dir = install_dir_for(db, name, all_installs)
+        proton = False
+        ids = [x for x in [g.get("s")] + g.get("sx", []) if x]
+        for appid in ids:
+            if appid in prefixes:
+                lib, pfx = prefixes[appid]
+                inst = []
+                if appid in app_dirs and app_dirs[appid][1].is_dir():
+                    folder = app_dirs[appid][1]
+                    inst = [(str(lib), str(folder), folder.name)]
+                    install_dir = install_dir or str(folder)
+                m = _match(g, proton_placeholders(pfx), inst, "windows")
+                matches += m
+                proton = proton or bool(m)
+        if heroic and _norm_title(name) in heroic:
+            m = _match(g, proton_placeholders(heroic[_norm_title(name)]), [], "windows")
+            matches += m
+            proton = proton or bool(m)
         if not matches:
             continue
         best = max(matches, key=lambda m: m[2])
@@ -361,14 +450,14 @@ def detect(db: dict, progress=lambda done, total: None) -> list:
         same = [m for m in matches if os.path.normcase(m[0]) == os.path.normcase(folder)]
         patterns = ["*"] if any(m[1] is None for m in same) else sorted({m[1] for m in same})
         others = sorted({m[0] for m in matches} - {folder})
-        exes = [x for x, oses in g.get("x", []) if not oses or SYSTEM in oses]
-        if SYSTEM == "windows":
+        exe_system = "windows" if (SYSTEM == "windows" or proton) else SYSTEM
+        exes = [x for x, oses in g.get("x", []) if not oses or exe_system in oses]
+        if exe_system == "windows":
             exes = [x for x in exes if x.lower().endswith(".exe")]
         found.append(Detected(name=name, folder=folder, patterns=patterns,
                               process=", ".join(dict.fromkeys(exes)), steam_id=g.get("s", 0),
                               mtime=best[2], files=_count(folder, patterns),
-                              extra_folders=others,
-                              install_dir=install_dir_for(db, name, all_installs),
+                              extra_folders=others, install_dir=install_dir,
                               store_cloud=store_cloud(db, name)))
     progress(total, total)
     found.sort(key=lambda d: d.mtime, reverse=True)

@@ -1,13 +1,14 @@
 """Segreti (password, chiavi S3, passphrase) nel portachiavi di sistema.
 
-Su Windows finiscono in Gestione credenziali, su macOS nel Portachiavi, su Linux in
-Secret Service/KWallet. Se il portachiavi non c'è si ripiega su un file nella cartella
-dell'app (meno sicuro, ma almeno funziona).
+Su Windows finiscono in Gestione credenziali, su macOS nel Portachiavi. Su Linux e Steam
+Deck in un file della cartella dell'app leggibile solo dal tuo utente: il portachiavi
+(KWallet/GNOME) non è attivo in modalità gioco né per i servizi di sistema.
 I token OAuth sono troppo lunghi per Gestione credenziali di Windows (max 2560 byte), quindi
 vanno in un file cifrato la cui chiave sta nel portachiavi.
 """
 import json
 import os
+import sys
 from pathlib import Path
 
 SERVICE = "SaveSync"
@@ -18,7 +19,10 @@ class Vault:
         self.app_dir = Path(app_dir)
         self._fallback_file = self.app_dir / "secrets.json"
         self._keyring = None
-        if not os.environ.get("SAVESYNC_NO_KEYRING"):
+        # Linux/Steam Deck: il portachiavi (KWallet/GNOME) non è attivo in modalità gioco né
+        # per i servizi di sistema, quindi file protetto (leggibile solo dal tuo utente).
+        linux = sys.platform.startswith("linux") and not os.environ.get("SAVESYNC_USE_KEYRING")
+        if not os.environ.get("SAVESYNC_NO_KEYRING") and not linux:
             try:
                 import keyring
                 from keyring.backends.fail import Keyring as FailKeyring
@@ -71,7 +75,11 @@ class Vault:
 
     def _write_fallback(self, data: dict) -> None:
         self.app_dir.mkdir(parents=True, exist_ok=True)
-        self._fallback_file.write_text(json.dumps(data), encoding="utf-8")
+        tmp = self._fallback_file.with_suffix(".tmp")
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(json.dumps(data))
+        os.replace(tmp, self._fallback_file)
 
     # ---------- token OAuth (lunghi) ----------
     def _fernet(self):
@@ -94,7 +102,9 @@ class Vault:
     def save_tokens(self, name: str, tokens: dict) -> None:
         p = self.app_dir / "tokens" / f"{name}.bin"
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_bytes(self._fernet().encrypt(json.dumps(tokens).encode()))
+        fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "wb") as f:
+            f.write(self._fernet().encrypt(json.dumps(tokens).encode()))
 
     def delete_tokens(self, name: str) -> None:
         (self.app_dir / "tokens" / f"{name}.bin").unlink(missing_ok=True)

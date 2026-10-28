@@ -30,3 +30,17 @@ def test_migrates_plaintext_secret(tmp_path):
 
 def test_process_names():
     assert process_names("EldenRing.exe, eldenring ; Other.EXE") == {"eldenring", "other"}
+
+
+def test_vault_file_is_private(tmp_path):
+    import os
+    import stat
+    from savesync.vault import Vault
+    v = Vault(tmp_path)
+    v.set("passphrase", "segreta")
+    v.save_tokens("gdrive", {"refresh_token": "x"})
+    assert Vault(tmp_path).get("passphrase") == "segreta"
+    assert Vault(tmp_path).load_tokens("gdrive") == {"refresh_token": "x"}
+    if os.name != "nt":
+        for f in (tmp_path / "secrets.json", tmp_path / "tokens" / "gdrive.bin"):
+            assert stat.S_IMODE(f.stat().st_mode) == 0o600

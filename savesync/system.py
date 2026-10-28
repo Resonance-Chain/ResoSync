@@ -1,6 +1,7 @@
 """Integrazione col sistema: avvio automatico, istanza singola, icona, comando per Steam."""
 import os
 import platform
+import shutil
 import socket
 import subprocess
 import sys
@@ -32,8 +33,85 @@ def quote_cmd(args: list) -> str:
 
 
 def steam_launch_options(game_id: str) -> str:
-    """Da incollare in Steam > Proprietà > Opzioni di avvio."""
-    return quote_cmd(app_command() + ["--launch", game_id]) + " %command%"
+    """Da incollare in Steam > Proprietà > Opzioni di avvio.
+    Su Linux/Steam Deck --quiet: in modalità gioco niente finestre sopra il gioco."""
+    extra = ["--quiet"] if SYSTEM == "Linux" else []
+    return quote_cmd(app_command() + extra + ["--launch", game_id]) + " %command%"
+
+
+def in_game_mode() -> bool:
+    """Steam Deck in modalità gioco (gamescope) o nessuno schermo: niente finestre."""
+    if SYSTEM != "Linux":
+        return False
+    env = os.environ
+    if env.get("XDG_CURRENT_DESKTOP", "").lower() == "gamescope":
+        return True
+    if env.get("GAMESCOPE_WAYLAND_DISPLAY") and not env.get("KDE_FULL_SESSION"):
+        return True
+    return not (env.get("DISPLAY") or env.get("WAYLAND_DISPLAY"))
+
+
+# ---------- servizio in background (Linux / Steam Deck) ----------
+SERVICE_NAME = "savesync.service"
+
+
+def _unit_file() -> Path:
+    return Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "systemd" / \
+        "user" / SERVICE_NAME
+
+
+def _systemctl(*args) -> subprocess.CompletedProcess:
+    return subprocess.run(["systemctl", "--user", *args], capture_output=True, text=True,
+                          timeout=30)
+
+
+def service_supported() -> bool:
+    return SYSTEM == "Linux" and shutil.which("systemctl") is not None
+
+
+def service_installed() -> bool:
+    return _unit_file().exists()
+
+
+def service_active() -> bool:
+    return service_supported() and _systemctl("is-active", SERVICE_NAME).stdout.strip() == "active"
+
+
+def set_background_service(enabled: bool) -> None:
+    """Servizio systemd dell'utente: parte all'accensione e lavora anche in modalità gioco."""
+    unit = _unit_file()
+    if not enabled:
+        if unit.exists():
+            _systemctl("disable", "--now", SERVICE_NAME)
+            unit.unlink(missing_ok=True)
+            _systemctl("daemon-reload")
+        return
+    unit.parent.mkdir(parents=True, exist_ok=True)
+    unit.write_text(
+        "[Unit]\nDescription=SaveSync - sincronizzazione dei salvataggi\n"
+        "After=network-online.target\nWants=network-online.target\n\n"
+        "[Service]\n"
+        f"ExecStart={quote_cmd(app_command() + ['--service'])}\n"
+        "Restart=on-failure\nRestartSec=30\n\n"
+        "[Install]\nWantedBy=default.target\n")
+    _systemctl("daemon-reload")
+    r = _systemctl("enable", "--now", SERVICE_NAME)
+    if r.returncode != 0:
+        raise OSError(r.stderr.strip() or "systemctl non ha funzionato")
+
+
+def pause_service() -> bool:
+    """Ferma il servizio mentre la finestra è aperta (due copie sincronizzerebbero insieme).
+    Ritorna True se era attivo, così si può riavviare alla chiusura."""
+    if service_active():
+        _systemctl("stop", SERVICE_NAME)
+        return True
+    return False
+
+
+def resume_service() -> None:
+    if service_supported() and service_installed():
+        _systemctl("start", SERVICE_NAME)
 
 
 # ---------- avvio automatico ----------

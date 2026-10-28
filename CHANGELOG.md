@@ -2,6 +2,15 @@
 
 ## 0.4.0
 
+- **Steam Deck e Linux**: versione Linux (`SaveSync-linux-x86_64.tar.gz`) con script di
+  installazione, **servizio in background** che lavora anche in modalità gioco, launcher
+  silenzioso per le opzioni di avvio di Steam. *Rileva giochi* trova i salvataggi dei giochi
+  Windows dentro i prefissi Proton (`steamapps/compatdata/<id>`), anche su microSD, e quelli di
+  Heroic. Guida: [STEAMDECK.md](STEAMDECK.md).
+- Cambiando cloud (es. da cartella Proton Drive a OneDrive) SaveSync riparte da zero e carica
+  tutto: con "propaga cancellazioni" attivo il cloud nuovo e vuoto poteva sembrare "cancellato
+  tutto".
+- Due istantanee nello stesso millisecondo non si sovrascrivono più.
 - **Istantanee della cartella**: quando apri un gioco (e prima di ogni ripristino) SaveSync
   salva una copia completa della cartella dei salvataggi. Tasto destro sul gioco >
   *Istantanee della cartella…* per tornare "a com'era prima di giocare ieri sera". I file

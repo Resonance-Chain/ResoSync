@@ -179,3 +179,40 @@ def test_restore_cloud_version_roundtrip(tmp_path):
     assert b.sync_game(gb)["up"] == 1
     assert a.sync_game(ga)["down"] == 1
     assert Path(ga.path, "s.sav").read_bytes() == b"buono"
+
+
+def test_switching_cloud_never_deletes_local_saves(tmp_path):
+    """Dalla cartella Proton Drive a Google Drive/OneDrive (cloud nuovo e vuoto) con
+    'propaga cancellazioni' attivo: i salvataggi locali NON devono sparire."""
+    from savesync.config import Config
+    cfg = Config(app_dir=tmp_path / "app")
+    cfg.settings.folder_path = str(tmp_path / "proton" / "SaveSync")
+    cfg.settings.propagate_deletes = True
+    (tmp_path / "proton").mkdir()
+    saves = tmp_path / "saves"
+    saves.mkdir()
+    (saves / "slot.sav").write_text("progressi")
+    game = Game("g", "G", str(saves))
+    SyncEngine(cfg.settings, FolderBackend(cfg.settings.folder_path), cfg.app_dir,
+               log=lambda m: None).sync_game(game)
+    before = cfg.cloud_identity()
+    cfg.settings.folder_path = str(tmp_path / "nuovo-cloud")
+    assert cfg.cloud_identity() != before
+    cfg.reset_all_states()  # quello che fa la finestra Impostazioni
+    eng = SyncEngine(cfg.settings, FolderBackend(cfg.settings.folder_path), cfg.app_dir,
+                     log=lambda m: None)
+    st = eng.sync_game(game)
+    assert (saves / "slot.sav").read_text() == "progressi"
+    assert st["up"] == 1 and st["deleted"] == 0
+
+
+def test_empty_cloud_never_propagates_deletes(tmp_path):
+    """Anche senza passare dalla finestra (config cambiata a mano): cloud vuoto = carico."""
+    a, ga, _ = pc(tmp_path, "A", propagate_deletes=True)
+    write(ga, "slot.sav", b"progressi", 1000)
+    a.sync_game(ga)
+    a2 = SyncEngine(a.settings, FolderBackend(tmp_path / "altro-cloud"), a.app_dir,
+                    log=lambda m: None)
+    st = a2.sync_game(ga)
+    assert st["deleted"] == 0 and st["up"] == 1
+    assert Path(ga.path, "slot.sav").read_bytes() == b"progressi"

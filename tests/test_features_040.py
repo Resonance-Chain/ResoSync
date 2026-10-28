@@ -268,3 +268,19 @@ def test_folder_backend_sizes(tmp_path):
     b.write_bytes("h/x", b"1")
     assert b.sizes("g/") == {"g/blobs/a/1": 5, "g/blobs/b/1": 1}
     assert b.list("g/blobs/a/") == ["g/blobs/a/1"]
+
+
+def test_snapshots_same_millisecond_never_overwrite(tmp_path, monkeypatch):
+    import savesync.snapshots as snapmod
+    eng, g = pc(tmp_path, "A", snapshots_keep=10)
+    monkeypatch.setattr(snapmod.time, "time", lambda: 1_800_000_000.123)  # orologio fermo
+    for i in range(3):
+        write(g, "s.sav", b"v%d" % i)
+        eng.snapshot(g, f"n{i}")
+    store = SnapshotStore(eng.app_dir, "g")
+    assert len(store.list()) == 3
+    restored = []
+    for s in store.list():
+        store.restore(g.path, s["id"])
+        restored.append(Path(g.path, "s.sav").read_bytes())
+    assert sorted(restored) == [b"v0", b"v1", b"v2"]

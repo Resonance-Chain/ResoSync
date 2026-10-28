@@ -129,7 +129,21 @@ class Config:
 
     def find_game(self, text: str):
         """Per ID o per nome (usato da --launch)."""
-        return self.get_game(text) or self.get_game(slugify(text))
+        low = text.strip().lower()
+        return self.get_game(text) or self.get_game(slugify(text)) or next(
+            (g for g in self.games if g.name.strip().lower() == low), None)
+
+    def cloud_identity(self) -> tuple:
+        """Cosa identifica il cloud in uso: se cambia, è un altro cloud."""
+        s = self.settings
+        where = {"folder": os.path.normcase(os.path.normpath(s.folder_path or ".")),
+                 "s3": (s.s3_endpoint, s.s3_bucket, s.s3_prefix),
+                 "gdrive": s.gdrive_client_id, "onedrive": s.onedrive_client_id}.get(s.backend)
+        return (s.backend, str(where))
+
+    def reset_all_states(self) -> None:
+        import shutil
+        shutil.rmtree(self.app_dir / "state", ignore_errors=True)
 
     def is_configured(self) -> bool:
         s = self.settings

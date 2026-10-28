@@ -37,7 +37,7 @@ class SnapshotStore:
             out.append({"id": p.stem, "time": data.get("time", 0),
                         "reason": data.get("reason", ""), "files": len(files),
                         "size": sum(f.get("size", 0) for f in files.values())})
-        return sorted(out, key=lambda s: s["id"], reverse=True)
+        return sorted(out, key=lambda s: (s["time"], s["id"]), reverse=True)
 
     def load(self, snap_id) -> dict:
         return json.loads((self.root / f"{snap_id}.json").read_text(encoding="utf-8"))
@@ -68,6 +68,8 @@ class SnapshotStore:
         kept = {r: {"hash": e["hash"], "size": e.get("size", 0), "mtime": e.get("mtime", 0)}
                 for r, e in files.items() if self._obj(e["hash"]).exists()}
         self.root.mkdir(parents=True, exist_ok=True)
+        while (self.root / f"{snap_id}.json").exists():
+            snap_id += "_"  # due istantanee nello stesso millisecondo: mai sovrascrivere
         (self.root / f"{snap_id}.json").write_text(json.dumps(
             {"time": now, "reason": reason, "files": kept}, indent=1), encoding="utf-8")
         self.prune(keep)

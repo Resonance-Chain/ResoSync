@@ -70,6 +70,57 @@ class Splash:
             self.root.update()
             time.sleep(0.2)
 
+    def ask(self, message, default=True):
+        self.root.deiconify()
+        return messagebox.askyesno("SaveSync", message, parent=self.root)
+
+    def info(self, message):
+        self.root.deiconify()
+        messagebox.showinfo("SaveSync", message, parent=self.root)
+
+    def warn(self, message):
+        self.root.deiconify()
+        messagebox.showwarning("SaveSync", message, parent=self.root)
+
+    def close(self):
+        self.root.destroy()
+
+
+class QuietUI:
+    """Launcher senza finestre (Steam Deck in modalità gioco): scrive solo nel log e nelle
+    situazioni dubbie non blocca mai il gioco."""
+    root = None
+
+    def __init__(self, log):
+        self._log = log
+
+    def say(self, text):
+        self._log(text)
+
+    def hide(self):
+        pass
+
+    def run(self, fn):
+        try:
+            return fn(), None
+        except Exception as e:  # noqa: BLE001
+            return None, e
+
+    def sleep(self, seconds):
+        time.sleep(seconds)
+
+    def ask(self, message, default=True):
+        self._log(message.replace("\n", " ") + f" -> {'sì' if default else 'no'} (senza finestre)")
+        return default
+
+    def info(self, message):
+        self._log(message.replace("\n", " "))
+
+    warn = info
+
+    def close(self):
+        pass
+
 
 def _log(cfg, msg):
     try:
@@ -117,10 +168,9 @@ def _wait_game(ui, game, proc):
         while proc.poll() is None:
             ui.sleep(1)
     if not can_watch:
-        if proc is None:
-            ui.root.deiconify()
-            messagebox.showinfo("SaveSync", f"Premi OK quando hai finito di giocare a "
-                                f"{game.name}: poi carico i salvataggi.", parent=ui.root)
+        if proc is None and ui.root is not None:
+            ui.info(f"Premi OK quando hai finito di giocare a {game.name}: poi carico i "
+                    "salvataggi.")
         return
     # Il primo processo era solo un launcher? Aspetta che compaia il gioco vero
     if proc is None or (not is_the_game and time.time() - started < 60):
@@ -131,25 +181,28 @@ def _wait_game(ui, game, proc):
         ui.sleep(3)
 
 
-def run(game_ref: str, command: list) -> int:
+def run(game_ref: str, command: list, quiet: bool = False) -> int:
     cfg = Config.load()
-    ui = Splash()
+    log = lambda m: _log(cfg, m)
+    ui = QuietUI(log) if quiet else Splash()
     game = cfg.find_game(game_ref)
     if game and not cfg.is_configured():
-        messagebox.showwarning("SaveSync", "Cloud non configurato: avvio il gioco senza "
-                               "sincronizzare. Apri SaveSync e completa le impostazioni.")
+        ui.warn("Cloud non configurato: avvio il gioco senza sincronizzare. Apri SaveSync e "
+                "completa le impostazioni.")
         game = None
     if not game:
-        messagebox.showerror("SaveSync", f"Gioco '{game_ref}' non trovato nella configurazione.")
+        if cfg.is_configured():
+            ui.warn(f"Gioco '{game_ref}' non trovato nella configurazione di SaveSync.")
+        ui.close()
         if command:  # non impedire di giocare per colpa nostra
             return subprocess.call(command)
         return 1
     if not command and not game.launch:
-        messagebox.showerror("SaveSync", f"Nessun comando di avvio per {game.name}: impostalo "
-                             "nella scheda del gioco o usa le opzioni di avvio di Steam.")
+        ui.warn(f"Nessun comando di avvio per {game.name}: impostalo nella scheda del gioco o "
+                "usa le opzioni di avvio di Steam.")
+        ui.close()
         return 1
 
-    log = lambda m: _log(cfg, m)
     holder = {}
 
     def sync(wait):
@@ -162,17 +215,19 @@ def run(game_ref: str, command: list) -> int:
     _, err = ui.run(lambda: sync(60))
     if err:
         log(f"[{game.name}] sync prima del gioco fallita: {err}")
-        if not messagebox.askyesno("SaveSync", f"Non riesco a scaricare i salvataggi:\n{err}\n\n"
-                                   "Avviare comunque il gioco?", parent=ui.root):
+        if not ui.ask(f"Non riesco a scaricare i salvataggi:\n{err}\n\nAvviare comunque il "
+                      "gioco?"):
+            ui.close()
             return 1
 
     eng = holder.get("engine")
     if eng is not None:
         others, _ = ui.run(lambda: eng.others_playing(game))
-        if others and not messagebox.askyesno(
-                "SaveSync", f"{game.name} risulta aperto anche su {', '.join(others)}.\n\n"
+        if others and not ui.ask(
+                f"{game.name} risulta aperto anche su {', '.join(others)}.\n\n"
                 "Se salvate nello stesso slot, alla fine vince il salvataggio più recente "
-                "(l'altro resta in Ripristina versione).\n\nAvviare comunque?", parent=ui.root):
+                "(l'altro resta in Ripristina versione).\n\nAvviare comunque?"):
+            ui.close()
             return 1
         ui.say(f"Salvo un'istantanea di {game.name}…")
         _, err = ui.run(lambda: eng.snapshot(game, "avvio del gioco"))
@@ -185,7 +240,8 @@ def run(game_ref: str, command: list) -> int:
     try:
         proc = _start_game(game, command)
     except OSError as e:
-        messagebox.showerror("SaveSync", f"Impossibile avviare il gioco:\n{e}", parent=ui.root)
+        ui.warn(f"Impossibile avviare il gioco:\n{e}")
+        ui.close()
         return 1
     _wait_game(ui, game, proc)
     log(f"[{game.name}] chiuso")
@@ -199,8 +255,7 @@ def run(game_ref: str, command: list) -> int:
             break
         ui.sleep(3)
     if err or stats["errors"]:
-        messagebox.showwarning("SaveSync", "Non sono riuscito a caricare tutti i salvataggi"
-                               f"{': ' + str(err) if err else ''}.\nRiproverà l'app in "
-                               "background.", parent=ui.root)
-    ui.root.destroy()
+        ui.warn("Non sono riuscito a caricare tutti i salvataggi"
+                f"{': ' + str(err) if err else ''}.\nRiproverà l'app in background.")
+    ui.close()
     return proc.returncode if proc is not None and proc.returncode is not None else 0

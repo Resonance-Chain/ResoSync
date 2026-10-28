@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+from pathlib import Path
 
 from savesync import launcher, service
 from savesync.backends import FolderBackend
@@ -133,3 +134,41 @@ def test_protected_process_matched_by_exe_name(tmp_path):
     # se il percorso è noto e sta altrove, il solo nome non basta
     elsewhere = os.path.normcase(str(tmp_path / "altro" / "eldenring.exe"))
     assert not service.is_game_running(game, [("eldenring", elsewhere)])
+
+
+def test_wine_exe_parsing():
+    w = service.wine_exe(["Z:\\home\\deck\\.local\\share\\Steam\\steamapps\\common\\"
+                          "Cyberpunk 2077\\bin\\x64\\Cyberpunk2077.exe", "--launcher-skip"])
+    assert w[0] == "cyberpunk2077"
+    assert w[1] == os.path.normcase(os.path.normpath(
+        "/home/deck/.local/share/Steam/steamapps/common/Cyberpunk 2077/bin/x64/Cyberpunk2077.exe"))
+    assert service.wine_exe(["python3", "/x/proton", "waitforexitandrun",
+                             "/home/deck/g/Game.EXE"]) == ("game", os.path.normcase("/home/deck/g/Game.EXE"))
+    assert service.wine_exe(["C:\\windows\\system32\\services.exe"]) == ("services", "")
+    assert service.wine_exe(["/usr/bin/bash"]) is None and service.wine_exe(None) is None
+
+
+def test_deck_proton_game_detected_by_install_dir(tmp_path):
+    install = "/home/deck/.local/share/Steam/steamapps/common/Cyberpunk 2077"
+    game = Game("cp", "Cyberpunk 2077", ".", process="redprelauncher.exe", install_dir=install)
+    w = service.wine_exe([
+        "Z:\\home\\deck\\.local\\share\\Steam\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\Cyberpunk2077.exe"])
+    procs = [("wine64-preloader", "/home/deck/.steam/proton/files/bin/wine64-preloader"), w]
+    if os.name == "nt":
+        return  # percorsi Linux: il confronto ha senso solo su Linux/macOS
+    assert service.is_game_running(game, procs)
+
+
+def test_running_processes_skips_own_ancestors():
+    """Avviando da Steam, il padre (reaper/proton) ha il percorso del gioco nella riga di
+    comando e vive finché vive il launcher: il launcher non deve contarlo come gioco aperto."""
+    import subprocess
+    repo = str(Path(__file__).resolve().parents[1])
+    child = ("import sys; sys.path.insert(0, %r); from savesync import service; "
+             "print(any(n == 'fintogiocopadre' for n, _ in service.running_processes()))" % repo)
+    parent = ("import subprocess, sys; "
+              "r = subprocess.run([sys.executable, '-c', %r], capture_output=True, text=True); "
+              "print(r.stdout.strip() or r.stderr)" % child)
+    out = subprocess.run([sys.executable, "-c", parent, "Z:\\giochi\\FintoGiocoPadre.exe"],
+                         capture_output=True, text=True, timeout=60).stdout.strip()
+    assert out == "False", out

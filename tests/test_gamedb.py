@@ -85,3 +85,52 @@ def test_install_dirs(monkeypatch, tmp_path):
     monkeypatch.setattr(gamedb, "placeholders", lambda: {"<home>": tmp_path / "home"})
     found = gamedb.detect(db)
     assert found[0].install_dir == str(lib / "steamapps/common/Cyberpunk 2077")
+
+
+def test_steam_deck_proton_prefixes(monkeypatch, tmp_path):
+    """Steam Deck: salvataggi dei giochi Windows dentro steamapps/compatdata/<id>/pfx,
+    anche su microSD; Heroic per Epic/GOG; prefisso senza salvataggi ignorato."""
+    home = tmp_path / "home/deck"
+    steam = home / ".local/share/Steam"
+    sd = tmp_path / "run/media/mmcblk0p1"
+
+    def app(lib, appid, installdir):
+        (lib / "steamapps/common" / installdir).mkdir(parents=True)
+        (lib / f"steamapps/appmanifest_{appid}.acf").write_text(
+            f'"AppState"\n{{\n\t"appid"\t\t"{appid}"\n\t"installdir"\t\t"{installdir}"\n}}')
+
+    def save(path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("x")
+
+    app(steam, 1091500, "Cyberpunk 2077")
+    save(steam / "steamapps/compatdata/1091500/pfx/drive_c/users/steamuser/Saved Games/"
+                 "CD Projekt Red/Cyberpunk 2077/ManualSave-3/sav.dat")
+    app(sd, 1245620, "ELDEN RING")
+    save(sd / "steamapps/compatdata/1245620/pfx/drive_c/users/steamuser/AppData/Roaming/"
+              "EldenRing/76561198000000001/ER0000.sl2")
+    (steam / "steamapps/compatdata/999/pfx/drive_c/users/steamuser").mkdir(parents=True)
+    save(home / "Games/Heroic/Prefixes/default/Hades/drive_c/users/steamuser/Documents/"
+                "Saved Games/Hades/Profile1.sav")
+    raw = {
+        "Cyberpunk 2077": {"files": {"<home>/Saved Games/CD Projekt Red/Cyberpunk 2077": {
+            "tags": ["save"], "when": [{"os": "windows"}]}}, "steam": {"id": 1091500},
+            "installDir": {"Cyberpunk 2077": {}}},
+        "Elden Ring": {"files": {"<winAppData>/EldenRing/<storeUserId>": {
+            "tags": ["save"], "when": [{"os": "windows"}]}}, "steam": {"id": 1245620}},
+        "Hades": {"files": {"<winDocuments>/Saved Games/Hades": {"when": [{"os": "windows"}]}},
+                  "launch": {"<base>/x64/Hades.exe": [{"when": [{"os": "windows"}]}]}},
+        "Mai avviato": {"files": {"<winDocuments>/Nope": {}}, "steam": {"id": 999}},
+    }
+    monkeypatch.setattr(gamedb, "SYSTEM", "linux")
+    monkeypatch.setattr(gamedb, "steam_libraries", lambda: [steam, sd])
+    monkeypatch.setattr(gamedb, "placeholders", lambda: {"<home>": home})
+    monkeypatch.setattr(gamedb.Path, "home", staticmethod(lambda: home))
+    found = {d.name: d for d in gamedb.detect({"games": gamedb.compact(raw)})}
+    assert set(found) == {"Cyberpunk 2077", "Elden Ring", "Hades"}
+    assert Path(found["Cyberpunk 2077"].folder).name == "Cyberpunk 2077"
+    assert "compatdata/1091500/pfx" in found["Cyberpunk 2077"].folder.replace("\\", "/")
+    assert found["Cyberpunk 2077"].install_dir == str(steam / "steamapps/common/Cyberpunk 2077")
+    assert str(sd) in found["Elden Ring"].folder and found["Elden Ring"].install_dir == \
+        str(sd / "steamapps/common/ELDEN RING")
+    assert found["Hades"].process == "Hades.exe"  # sotto Proton contano gli exe Windows

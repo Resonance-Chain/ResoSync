@@ -24,20 +24,54 @@ except ImportError:
 BUSY_RETRY = 15  # secondi prima di riprovare se un altro PC tiene il lock
 
 
+def wine_exe(cmdline) -> tuple:
+    """Giochi Windows sotto Proton/Wine (Steam Deck, Linux): il processo si chiama wine o ha
+    il nome tagliato a 15 caratteri, ma nella riga di comando c'è il percorso dell'exe
+    (Z:\\home\\deck\\...\\Gioco.exe oppure /home/deck/.../Gioco.exe).
+    Ritorna (nome senza .exe, percorso Linux o "") oppure None."""
+    for arg in cmdline or []:
+        if not arg.lower().endswith(".exe"):
+            continue
+        name = re.split(r"[\\/]", arg)[-1].lower()[:-4]
+        if re.match(r"^[zZ]:\\", arg):
+            path = "/" + arg[3:].replace("\\", "/")
+        elif arg.startswith("/"):
+            path = arg
+        else:
+            path = ""  # C:\\... dentro il prefisso: basta il nome
+        return name, os.path.normcase(os.path.normpath(path)) if path else ""
+    return None
+
+
 def running_processes(with_paths=True) -> list:
     """[(nome senza .exe in minuscolo, percorso dell'exe normalizzato o "")]"""
     if psutil is None:
         return []
     out = []
     me = os.getpid()
+    # Escludo me stesso e i miei "antenati": avviando da Steam con le opzioni di avvio,
+    # il processo padre (reaper/proton) ha nella riga di comando il percorso del gioco e
+    # vive finché vivo io: contarlo farebbe aspettare il launcher per sempre.
+    skip = {me}
+    try:
+        skip |= {a.pid for a in psutil.Process(me).parents()}
+    except Exception:
+        pass
+    unix = os.name != "nt"
     attrs = ["name", "exe"] if with_paths else ["name"]
+    if unix:
+        attrs.append("cmdline")
     for p in psutil.process_iter(attrs):
-        if p.pid == me:
+        if p.pid in skip:
             continue
         n = (p.info.get("name") or "").lower()
         exe = p.info.get("exe") or "" if with_paths else ""
         out.append((n[:-4] if n.endswith(".exe") else n,
                     os.path.normcase(os.path.normpath(exe)) if exe else ""))
+        if unix:
+            w = wine_exe(p.info.get("cmdline"))
+            if w:
+                out.append((w[0], w[1] if with_paths else ""))
     return out
 
 
