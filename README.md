@@ -4,6 +4,8 @@ Sincronizza i salvataggi dei videogiochi tra più PC passando dal cloud.
 Trova da solo i giochi installati, si accorge quando un gioco salva, carica i salvataggi
 quando chiudi il gioco e li scarica quando lo riapri su un altro PC.
 
+> Prima volta? Segui la guida passo passo: [SETUP.md](SETUP.md)
+
 ## Installazione su Windows
 
 **Modo facile**: scarica `SaveSync-Setup-x.y.z.exe` dalla pagina Releases (o dagli artifact di
