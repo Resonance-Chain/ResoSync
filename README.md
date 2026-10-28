@@ -123,4 +123,4 @@ python -m pytest -v tests
 ```
 
 La pipeline `.github/workflows/build.yml` esegue i test su Windows, Linux e macOS, compila l'exe,
-verifica che parta e crea installer + zip portabile. Con un tag `v1.0.0` pubblica una Release.
+verifica che parta e crea installer + zip portabile. Pubblicando una Release (es. `v1.0.0`) installer e zip vengono allegati da soli.
