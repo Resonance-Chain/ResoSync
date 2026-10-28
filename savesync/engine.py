@@ -212,7 +212,14 @@ class SyncEngine:
             local = self.scan_local(game)
             skip = self._unreadable.get(game.id, set())
             manifest = self.load_manifest(game.id)
-            if not self._differs(local, manifest, skip):
+            if game.mode == "backup":
+                # solo backup: conta solo se è cambiato qualcosa QUI (quello che fanno gli
+                # altri PC sul cloud non tocca la cartella del gioco)
+                base = self._load_state(game.id)["base"]
+                if all(base.get(r) == e["hash"] for r, e in local.items()):
+                    return {"up": 0, "down": 0, "conflicts": 0, "deleted": 0,
+                            "errors": len(skip)}
+            elif not self._differs(local, manifest, skip):
                 # Tutto allineato: niente lock, solo aggiornare la base locale
                 state = self._load_state(game.id)
                 for r in set(state["base"]) - set(local) - skip:
@@ -254,12 +261,27 @@ class SyncEngine:
                      f"riscarico dal cloud")
             propagate = False
 
+        backup_only = game.mode == "backup"
         for rel in sorted(set(local) | set(remote) | set(base)):
             if rel in skip:
                 continue
             L = local.get(rel, {}).get("hash")
             R = remote.get(rel, {}).get("hash")
             B = base.get(rel)
+            if backup_only:
+                # Il gioco ha già il suo cloud (Steam, Epic, GOG): SaveSync tiene solo le
+                # copie con le versioni. Carico quello che cambia qui, non scarico mai.
+                if L is not None and L != B and L != R:
+                    try:
+                        self._upload(game, rel, rel in remote, changes, base, mtimes, remote)
+                        stats["up"] += 1
+                    except Exception as e:
+                        stats["errors"] += 1
+                        self.log(f"[{game.name}] errore su {rel}: {e}")
+                elif L is not None:
+                    base[rel] = L
+                    mtimes[rel] = local[rel]["mtime"]
+                continue
             if L == R:
                 if L is None:
                     base.pop(rel, None)
@@ -325,7 +347,125 @@ class SyncEngine:
         if changes:
             self._save_manifest(game.id, changes)
         self._save_state(game.id, state)
+        if changes and game.max_cloud_mb > 0:
+            try:
+                self.enforce_space(game)
+            except Exception as e:
+                self.log(f"[{game.name}] pulizia spazio non riuscita: {e}")
+        self._history(game, stats, changes)
         return stats
+
+    # ---------- cronologia ----------
+    def _history(self, game, stats, changes):
+        if not any(stats.values()):
+            return
+        p = self.app_dir / "history" / f"{game.id}.jsonl"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        entry = {"time": time.time(), **stats, "uploaded": sorted(changes)[:50]}
+        with open(p, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry) + "\n")
+        lines = p.read_text(encoding="utf-8").splitlines()
+        if len(lines) > 500:
+            p.write_text("\n".join(lines[-500:]) + "\n", encoding="utf-8")
+
+    def history(self, game, limit=100) -> list:
+        p = self.app_dir / "history" / f"{game.id}.jsonl"
+        try:
+            lines = p.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            return []
+        out = []
+        for line in reversed(lines[-limit:]):
+            try:
+                out.append(json.loads(line))
+            except ValueError:
+                pass
+        return out
+
+    # ---------- "sto giocando" ----------
+    # Ogni PC che ha il gioco aperto tiene sul cloud un file <gioco>/playing/<pc>.json
+    # aggiornato ogni 2 minuti: gli altri PC lo vedono e avvisano.
+    PRESENCE_TTL = 300
+
+    def set_playing(self, game, playing: bool) -> None:
+        key = f"{game.id}/playing/{self._device_tag()}.json"
+        if playing:
+            self.backend.write_bytes(key, json.dumps({
+                "device": self.settings.device_name, "time": time.time()}).encode())
+        else:
+            self.backend.delete(key)
+
+    def others_playing(self, game) -> list:
+        mine = f"{game.id}/playing/{self._device_tag()}.json"
+        out = []
+        for key in self.backend.list(f"{game.id}/playing/"):
+            if key == mine:
+                continue
+            info = self._read_json(key) or {}
+            if time.time() - info.get("time", 0) < self.PRESENCE_TTL:
+                out.append(info.get("device", key.rsplit("/", 1)[-1][:-5]))
+        return out
+
+    # ---------- spazio sul cloud ----------
+    def cloud_usage(self, game) -> dict:
+        """{'current': byte dei salvataggi attuali, 'versions': byte delle versioni vecchie,
+        'n_versions': quante}"""
+        current = {e.get("blob") for e in self.load_manifest(game.id)["files"].values()
+                   if not e.get("deleted")}
+        sizes = self.backend.sizes(f"{game.id}/blobs/")
+        sizes.update(self.backend.sizes(f"{game.id}/versions/"))
+        sizes.update(self.backend.sizes(f"{game.id}/files/"))
+        cur = sum(v or 0 for k, v in sizes.items() if k in current or "/files/" in k)
+        old = {k: v for k, v in sizes.items() if k not in current and "/files/" not in k}
+        return {"current": cur, "versions": sum(v or 0 for v in old.values()),
+                "n_versions": len(old)}
+
+    def _old_versions(self, game) -> list:
+        """Versioni non attuali, dalla più vecchia: [(chiave, byte)]."""
+        current = {e.get("blob") for e in self.load_manifest(game.id)["files"].values()
+                   if not e.get("deleted")}
+        sizes = self.backend.sizes(f"{game.id}/blobs/")
+        sizes.update(self.backend.sizes(f"{game.id}/versions/"))
+        old = [(k, v or 0) for k, v in sizes.items() if k not in current]
+        return sorted(old, key=lambda kv: kv[0].rsplit("/", 1)[-1])  # nome = data
+
+    def enforce_space(self, game) -> int:
+        """Cancella le versioni più vecchie finché il gioco sta nel suo limite di spazio.
+        I salvataggi attuali non si toccano mai. Ritorna i byte liberati."""
+        limit = game.max_cloud_mb * 1024 * 1024
+        usage = self.cloud_usage(game)
+        total = usage["current"] + usage["versions"]
+        freed = 0
+        for key, size in self._old_versions(game):
+            if total - freed <= limit:
+                break
+            self.backend.delete(key)
+            freed += size
+        if freed:
+            self.log(f"[{game.name}] limite spazio: liberati {freed // 1024} KB di versioni vecchie")
+        return freed
+
+    def cleanup_versions(self, game, keep: int) -> int:
+        """Tiene solo le ultime `keep` versioni per file. Ritorna i byte liberati."""
+        by_file = {}
+        for key, size in self._old_versions(game):
+            folder = key.rsplit("/", 1)[0]
+            by_file.setdefault(folder, []).append((key, size))
+        freed = 0
+        for items in by_file.values():
+            for key, size in items[:-keep] if keep > 0 else items:
+                self.backend.delete(key)
+                freed += size
+        return freed
+
+    # ---------- istantanee ----------
+    def snapshot(self, game, reason: str):
+        from .snapshots import SnapshotStore
+        if not Path(game.path).is_dir():
+            return None
+        local = self.scan_local(game)
+        return SnapshotStore(self.app_dir, game.id).take(
+            game.path, local, reason, self.settings.snapshots_keep)
 
     def _upload(self, game, rel, overwrite, changes, base, mtimes, remote):
         src = Path(game.path, rel)
@@ -458,9 +598,91 @@ class SyncEngine:
                 out.append((p.name, "backup locale", str(p)))
         return sorted(out, reverse=True)
 
+    # ---------- anteprima di una versione ----------
+    IMAGE_EXT = (".png", ".jpg", ".jpeg", ".bmp", ".webp")
+    _INFO_KEYS = re.compile(r"name|level|lvl|time|location|area|zone|region|quest|mission|"
+                            r"chapter|difficulty|character|class|play|date|money|gold|day",
+                            re.IGNORECASE)
+
+    def _read_version(self, origin, ref):
+        if origin == "backup locale":
+            return Path(ref).read_bytes()
+        return self.backend.read_bytes(ref)
+
+    @classmethod
+    def _json_info(cls, data: bytes) -> list:
+        """Le voci più parlanti di un file JSON di metadati (livello, luogo, tempo...)."""
+        try:
+            obj = json.loads(data.decode("utf-8-sig"))
+        except (ValueError, UnicodeDecodeError):
+            return []
+        out = []
+
+        def walk(o, path=""):
+            if len(out) >= 10:
+                return
+            if isinstance(o, dict):
+                for k, v in o.items():
+                    walk(v, k)
+            elif isinstance(o, list):
+                for v in o[:20]:
+                    walk(v, path)
+            elif path and cls._INFO_KEYS.search(path) and isinstance(o, (str, int, float)) \
+                    and not isinstance(o, bool) and str(o).strip() and len(str(o)) < 80:
+                out.append((path, o))
+        walk(obj)
+        return out
+
+    def preview(self, game, rel, origin, ref) -> dict:
+        """{'image': byte o None, 'image_from': nome, 'info': [(chiave, valore)], 'size': n}
+        Se il file non è un'immagine, cerca nella stessa cartella lo screenshot e i metadati
+        salvati nello stesso momento (es. Cyberpunk: sav.dat + screenshot.png + metadata.json)."""
+        data = self._read_version(origin, ref) or b""
+        out = {"image": None, "image_from": "", "info": [], "size": len(data)}
+        low = rel.lower()
+        if low.endswith(self.IMAGE_EXT):
+            out["image"], out["image_from"] = data, rel
+        elif low.endswith(".json"):
+            out["info"] = self._json_info(data)
+        if out["image"] and out["info"]:
+            return out
+        stamp = Path(ref).name.split("__")[0][:15]
+        folder = rel.rsplit("/", 1)[0] if "/" in rel else ""
+        # versioni dei file vicini, caricate entro 10 minuti da questa
+        candidates = []
+        if origin == "backup locale":
+            root = self.app_dir / "backups" / game.id / folder
+            for f in (root.iterdir() if root.is_dir() else []):
+                if f.is_dir() and f.name != Path(rel).name:
+                    for v in f.iterdir():
+                        candidates.append((f.name, "backup locale", str(v), v.name[:15]))
+        else:
+            prefix = f"{game.id}/blobs/{folder}/" if folder else f"{game.id}/blobs/"
+            for key in self.backend.list(prefix):
+                parts = key[len(prefix):].split("/")
+                if len(parts) == 2 and parts[0] != Path(rel).name:
+                    candidates.append((parts[0], "cloud", key, parts[1][:15]))
+
+        def distance(c):
+            try:
+                a = time.mktime(time.strptime(stamp, "%Y%m%d-%H%M%S"))
+                b = time.mktime(time.strptime(c[3], "%Y%m%d-%H%M%S"))
+                return abs(a - b)
+            except ValueError:
+                return float("inf")
+        for name, org, key, _ in sorted(candidates, key=distance):
+            if distance((name, org, key, _)) > 600:
+                break
+            if not out["image"] and name.lower().endswith(self.IMAGE_EXT):
+                out["image"], out["image_from"] = self._read_version(org, key), name
+            elif not out["info"] and name.lower().endswith(".json"):
+                out["info"] = self._json_info(self._read_version(org, key) or b"")
+        return out
+
     def restore_version(self, game, rel, origin, ref) -> None:
         """Rimette una versione vecchia in locale; alla prossima sync parte verso il cloud."""
         with self.lock:
+            self.snapshot(game, f"prima di ripristinare {rel}")
             dst = Path(game.path, rel)
             if origin == "backup locale":
                 if dst.exists():

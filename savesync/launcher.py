@@ -166,6 +166,20 @@ def run(game_ref: str, command: list) -> int:
                                    "Avviare comunque il gioco?", parent=ui.root):
             return 1
 
+    eng = holder.get("engine")
+    if eng is not None:
+        others, _ = ui.run(lambda: eng.others_playing(game))
+        if others and not messagebox.askyesno(
+                "SaveSync", f"{game.name} risulta aperto anche su {', '.join(others)}.\n\n"
+                "Se salvate nello stesso slot, alla fine vince il salvataggio più recente "
+                "(l'altro resta in Ripristina versione).\n\nAvviare comunque?", parent=ui.root):
+            return 1
+        ui.say(f"Salvo un'istantanea di {game.name}…")
+        _, err = ui.run(lambda: eng.snapshot(game, "avvio del gioco"))
+        if err:
+            log(f"[{game.name}] istantanea non riuscita: {err}")
+        ui.run(lambda: eng.set_playing(game, True))
+
     ui.hide()
     log(f"[{game.name}] avvio")
     try:
@@ -175,6 +189,8 @@ def run(game_ref: str, command: list) -> int:
         return 1
     _wait_game(ui, game, proc)
     log(f"[{game.name}] chiuso")
+    if eng is not None:
+        ui.run(lambda: eng.set_playing(game, False))
 
     ui.say(f"Carico i salvataggi di {game.name}…")
     for attempt in range(4):  # su Windows i file possono restare bloccati qualche secondo

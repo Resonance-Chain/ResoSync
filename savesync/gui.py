@@ -8,7 +8,8 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-from . import gamedb, system
+from . import __version__, gamedb, system, updater
+from .dialogs import PreviewPanel, SnapshotDialog, StatusDialog, run_bg
 from .backends import make_backend
 from .config import Config, Game, slugify
 from .engine import SyncEngine
@@ -33,7 +34,7 @@ def _hint(parent, text, **grid):
 class App(tk.Tk):
     def __init__(self, minimized=False, instance=None):
         super().__init__()
-        self.title("SaveSync")
+        self.title(f"SaveSync {__version__}")
         self.geometry("960x580")
         self.minsize(760, 440)
         self.cfg = Config.load()
@@ -91,16 +92,18 @@ class App(tk.Tk):
             self.tree.heading(col, text=title)
             self.tree.column(col, width=w, anchor="w")
         self.tree.pack(fill="both", expand=True)
-        self.tree.bind("<Double-1>", lambda e: self.edit_game())
+        self.tree.bind("<Double-1>", lambda e: self.show_details())
         self.tree.bind("<Button-3>", self._context_menu)
         self.tree.bind("<Delete>", lambda e: self.remove_game())
         paned.add(frame, weight=3)
 
         self.menu = tk.Menu(self, tearoff=0)
-        for label, cmd in [("Modifica…", self.edit_game), ("Sincronizza ora", self.sync_selected),
+        for label, cmd in [("Dettagli e spazio…", self.show_details),
+                           ("Modifica…", self.edit_game), ("Sincronizza ora", self.sync_selected),
                            ("Avvia gioco con sync", self.launch_game),
                            ("Copia opzioni di avvio Steam", self.copy_steam_options),
                            ("Ripristina versione…", self.restore),
+                           ("Istantanee della cartella…", self.show_snapshots),
                            ("Apri cartella salvataggi", self.open_folder), (None, None),
                            ("Rimuovi", self.remove_game)]:
             if label is None:
@@ -117,8 +120,12 @@ class App(tk.Tk):
         self.logbox.pack(fill="both", expand=True)
         paned.add(logf, weight=1)
 
-        self.statusbar = ttk.Label(self, anchor="w", padding=(8, 2))
-        self.statusbar.pack(fill="x")
+        bottom = ttk.Frame(self)
+        bottom.pack(fill="x")
+        self.update_button = ttk.Button(bottom, text="", command=self._apply_update)
+        self.statusbar = ttk.Label(bottom, anchor="w", padding=(8, 2))
+        self.statusbar.pack(side="left", fill="x", expand=True)
+        self._update = None
         self._refresh()
 
     def _context_menu(self, event):
@@ -133,7 +140,8 @@ class App(tk.Tk):
         for g in self.cfg.games:
             st = self.status.get(g.id, "In attesa" if g.enabled else "Disattivato")
             watch = g.process or (f"[{Path(g.install_dir).name}]" if g.install_dir else "")
-            self.tree.insert("", "end", iid=g.id, values=(g.name, g.path, watch, st))
+            name = g.name + ("  (solo backup)" if g.mode == "backup" else "")
+            self.tree.insert("", "end", iid=g.id, values=(name, g.path, watch, st))
         if sel and self.tree.exists(sel[0]):
             self.tree.selection_set(sel[0])
         s = self.cfg.settings
@@ -275,6 +283,9 @@ class App(tk.Tk):
         self.service.start()
         self._log("Servizio di sincronizzazione avviato")
         self._fill_install_dirs()
+        if not getattr(self, "_update_timer", None):
+            self._update_timer = True
+            self.after(5000, self._check_updates)
         self._refresh()
 
     def _fill_install_dirs(self):
@@ -292,6 +303,55 @@ class App(tk.Tk):
             except Exception as e:
                 self._emit("log", f"Ricerca cartelle d'installazione fallita: {e}")
         threading.Thread(target=work, daemon=True).start()
+
+    # ---------- aggiornamenti ----------
+    def _check_updates(self, manual=False):
+        s = self.cfg.settings
+        if not manual:
+            self.after(12 * 3600 * 1000, self._check_updates)  # ricontrollo ogni 12 ore
+            if not s.auto_update:
+                return
+
+        def done(update):
+            self._update = update
+            if update:
+                self.update_button.configure(text=f"Aggiorna a {update.version}")
+                # prima della barra di stato: se il testo è lungo, il pulsante non deve sparire
+                self.update_button.pack(side="right", padx=8, pady=2, before=self.statusbar)
+                self._log(f"Disponibile SaveSync {update.version} ({update.page_url})")
+                self._notify("Aggiornamento disponibile",
+                             f"SaveSync {update.version}: clicca 'Aggiorna' nella finestra.")
+            elif manual:
+                messagebox.showinfo("SaveSync", f"Hai già l'ultima versione ({__version__}).")
+
+        def failed(e):
+            self._log(f"Controllo aggiornamenti non riuscito: {e}")
+            if manual:
+                messagebox.showwarning("SaveSync", f"Controllo aggiornamenti non riuscito:\n{e}")
+        run_bg(self, lambda: updater.check(s.update_repo, s.github_token), done, failed)
+
+    def _apply_update(self):
+        u = self._update
+        if not u:
+            return
+        if not updater.can_self_install() or not u.installer_url:
+            import webbrowser
+            webbrowser.open(u.page_url)
+            return
+        if not messagebox.askyesno("Aggiornamento", f"Installare SaveSync {u.version}?\n\n"
+                                   "SaveSync si chiude, si aggiorna e si riapre da solo "
+                                   "(meno di un minuto). Ricordati di aggiornare anche gli "
+                                   "altri PC."):
+            return
+        self.update_button.configure(text="Scarico…", state="disabled")
+
+        def done(path):
+            updater.install(path)
+            self._quit()
+        run_bg(self, lambda: updater.download(u, self.cfg.settings.github_token), done,
+               lambda e: (messagebox.showerror("SaveSync", f"Download non riuscito:\n{e}"),
+                          self.update_button.configure(text=f"Aggiorna a {u.version}",
+                                                       state="normal")))
 
     def _first_run(self):
         self._show()
@@ -438,6 +498,16 @@ class App(tk.Tk):
                             "Da quel momento, ogni volta che avvii il gioco da Steam, SaveSync "
                             "scarica i salvataggi prima e li carica quando chiudi.")
 
+    def show_details(self):
+        g = self._selected()
+        if g and self._require_engine():
+            StatusDialog(self, g)
+
+    def show_snapshots(self):
+        g = self._selected()
+        if g and self._require_engine():
+            SnapshotDialog(self, g)
+
     def open_settings(self):
         SettingsDialog(self)
 
@@ -460,6 +530,8 @@ class GameDialog(tk.Toplevel):
         self.process = tk.StringVar(value=game.process if game else "")
         self.launch = tk.StringVar(value=game.launch if game else "")
         self.install_dir = tk.StringVar(value=game.install_dir if game else "")
+        self.mode = tk.StringVar(value=game.mode if game else "sync")
+        self.max_mb = tk.StringVar(value=str(game.max_cloud_mb if game else 0))
         self.enabled = tk.BooleanVar(value=game.enabled if game else True)
 
         ttk.Label(f, text="Nome del gioco").grid(row=0, column=0, sticky="w")
@@ -504,11 +576,29 @@ class GameDialog(tk.Toplevel):
         _hint(f, "Facoltativo, per 'Avvia gioco'. Es. steam://rungameid/1245620 oppure il "
                  "percorso dell'exe.", row=10, column=1, columnspan=2)
 
+        ttk.Label(f, text="Modalità").grid(row=11, column=0, sticky="nw", pady=(8, 0))
+        modes = ttk.Frame(f)
+        modes.grid(row=11, column=1, columnspan=2, sticky="w", pady=(8, 0))
+        ttk.Radiobutton(modes, text="Sincronizza tra i PC", variable=self.mode,
+                        value="sync").pack(anchor="w")
+        ttk.Radiobutton(modes, text="Solo backup: carica le versioni, non scarica mai nella "
+                        "cartella del gioco", variable=self.mode, value="backup").pack(anchor="w")
+        stores = gamedb.store_cloud(gamedb.load(app.cfg.app_dir), game.name if game else "")
+        if stores:
+            _hint(f, f"Questo gioco ha già il cloud di {', '.join(stores)}. Se lo usi su tutti i "
+                     "PC conviene 'Solo backup', così i due sistemi non si pestano i piedi.",
+                  row=12, column=1, columnspan=2)
+        ttk.Label(f, text="Limite spazio versioni").grid(row=13, column=0, sticky="w", pady=(6, 0))
+        lim = ttk.Frame(f)
+        lim.grid(row=13, column=1, sticky="w", pady=(6, 0))
+        ttk.Entry(lim, textvariable=self.max_mb, width=8).pack(side="left")
+        ttk.Label(lim, text="MB sul cloud (0 = nessun limite)").pack(side="left", padx=4)
+
         ttk.Checkbutton(f, text="Sincronizzazione attiva", variable=self.enabled).grid(
-            row=11, column=1, sticky="w", pady=6)
+            row=14, column=1, sticky="w", pady=6)
 
         btns = ttk.Frame(f)
-        btns.grid(row=12, column=0, columnspan=3, sticky="e", pady=(8, 0))
+        btns.grid(row=15, column=0, columnspan=3, sticky="e", pady=(8, 0))
         ttk.Button(btns, text="Annulla", command=self.destroy).pack(side="right")
         ttk.Button(btns, text="Salva", command=self._save).pack(side="right", padx=4)
         self.grab_set()
@@ -554,11 +644,20 @@ class GameDialog(tk.Toplevel):
             messagebox.showerror("SaveSync", "Servono nome e cartella.", parent=self)
             return
         split = lambda s: [x.strip() for x in s.split(",") if x.strip()]
+        try:
+            max_mb = int(self.max_mb.get() or 0)
+            if max_mb < 0:
+                raise ValueError
+        except ValueError:
+            messagebox.showerror("SaveSync", "Il limite di spazio dev'essere un numero (MB).",
+                                 parent=self)
+            return
         game = Game(id=self.game.id if self.game else slugify(name), name=name, path=path,
                     patterns=split(self.patterns.get()) or ["*"],
                     excludes=split(self.excludes.get()), enabled=self.enabled.get(),
                     process=self.process.get().strip(), launch=self.launch.get().strip(),
-                    install_dir=self.install_dir.get().strip())
+                    install_dir=self.install_dir.get().strip(), mode=self.mode.get(),
+                    max_cloud_mb=max_mb)
         if not Path(path).exists() and not messagebox.askyesno(
                 "Cartella inesistente", "La cartella non esiste: crearla e scaricarci i salvataggi "
                 "dal cloud?", parent=self):
@@ -591,10 +690,11 @@ class DetectDialog(tk.Toplevel):
 
         frame = ttk.Frame(self, padding=8)
         frame.pack(fill="both", expand=True)
-        self.tree = ttk.Treeview(frame, columns=("name", "folder", "files", "when"),
+        self.tree = ttk.Treeview(frame, columns=("name", "folder", "files", "when", "cloud"),
                                  show="headings", selectmode="extended")
-        for col, title, w in [("name", "Gioco", 220), ("folder", "Cartella trovata", 440),
-                              ("files", "File", 50), ("when", "Ultima modifica", 120)]:
+        for col, title, w in [("name", "Gioco", 220), ("folder", "Cartella trovata", 380),
+                              ("files", "File", 50), ("when", "Ultima modifica", 110),
+                              ("cloud", "Ha già il cloud di", 130)]:
             self.tree.heading(col, text=title)
             self.tree.column(col, width=w, anchor="w")
         sb = ttk.Scrollbar(frame, command=self.tree.yview)
@@ -661,17 +761,34 @@ class DetectDialog(tk.Toplevel):
             if q and q not in d.name.lower():
                 continue
             when = time.strftime("%d/%m/%Y", time.localtime(d.mtime)) if d.mtime else ""
-            self.tree.insert("", "end", iid=str(i), values=(d.name, d.folder, d.files, when))
+            self.tree.insert("", "end", iid=str(i), values=(d.name, d.folder, d.files, when,
+                                                            ", ".join(d.store_cloud)))
             shown += 1
         self.info.config(text=f"{shown} giochi con salvataggi trovati (non ancora aggiunti)")
 
     def _add(self):
         added = 0
-        for iid in self.tree.selection():
-            d = self.results[int(iid)]
+        chosen = [self.results[int(iid)] for iid in self.tree.selection()]
+        with_cloud = [d for d in chosen if d.store_cloud]
+        backup = False
+        if with_cloud:
+            names = ", ".join(d.name for d in with_cloud[:5]) + ("…" if len(with_cloud) > 5 else "")
+            answer = messagebox.askyesnocancel(
+                "Giochi con il cloud dello store",
+                f"{len(with_cloud)} giochi hanno già il cloud di Steam/Epic/GOG ({names}).\n\n"
+                "Sì = SOLO BACKUP: SaveSync tiene copie e versioni sul tuo cloud ma non scarica "
+                "mai nella cartella del gioco, la sincronizzazione la fa lo store. Consigliato se "
+                "usi lo stesso store su tutti i PC.\n\n"
+                "No = SINCRONIZZA comunque con SaveSync (utile se il cloud dello store è spento "
+                "o se giochi da store diversi).", parent=self)
+            if answer is None:
+                return
+            backup = answer
+        for d in chosen:
             launch = f"steam://rungameid/{d.steam_id}" if d.steam_id else ""
             game = Game(id=slugify(d.name), name=d.name, path=d.folder, patterns=d.patterns,
-                        process=d.process, launch=launch, install_dir=d.install_dir)
+                        process=d.process, launch=launch, install_dir=d.install_dir,
+                        mode="backup" if backup and d.store_cloud else "sync")
             if self.app._save_game(None, game, quiet=True):
                 added += 1
         self._fill()
@@ -685,7 +802,7 @@ class RestoreDialog(tk.Toplevel):
         self.app, self.game = app, game
         self.title(f"Ripristina versione - {game.name}")
         self.transient(app)
-        self.geometry("760x420")
+        self.geometry("1100x480")
         self.files, self.versions = [], []
 
         pw = ttk.PanedWindow(self, orient="horizontal")
@@ -699,7 +816,10 @@ class RestoreDialog(tk.Toplevel):
         rf = ttk.LabelFrame(pw, text="Versioni (più recenti in alto)", padding=4)
         self.vlist = tk.Listbox(rf, exportselection=False)
         self.vlist.pack(fill="both", expand=True)
+        self.vlist.bind("<<ListboxSelect>>", self._preview)
         pw.add(rf, weight=1)
+        self.preview = PreviewPanel(pw)
+        pw.add(self.preview, weight=1)
 
         bf = ttk.Frame(self, padding=(8, 0, 8, 8))
         bf.pack(fill="x")
@@ -711,27 +831,16 @@ class RestoreDialog(tk.Toplevel):
                                 set(app.engine.scan_local(game))), self._show_files)
 
     def _bg(self, fn, done):
-        """Le richieste al cloud non devono bloccare la finestra."""
-        box = {}
+        run_bg(self, fn, done)
 
-        def work():
-            try:
-                box["r"] = fn()
-            except Exception as e:
-                box["e"] = e
-
-        def poll():
-            if not self.winfo_exists():
-                return
-            if t.is_alive():
-                self.after(100, poll)
-            elif "e" in box:
-                messagebox.showerror("SaveSync", str(box["e"]), parent=self)
-            else:
-                done(box["r"])
-        t = threading.Thread(target=work, daemon=True)
-        t.start()
-        poll()
+    def _preview(self, _=None):
+        rel, sel = self._rel(), self.vlist.curselection()
+        if not rel or not sel or not self.versions:
+            return
+        _, origin, ref = self.versions[sel[0]]
+        self.preview.clear("Carico l'anteprima…")
+        run_bg(self, lambda: self.app.engine.preview(self.game, rel, origin, ref),
+               self.preview.show, lambda e: self.preview.clear(f"Anteprima non disponibile: {e}"))
 
     def _show_files(self, files):
         self.files = files
@@ -746,6 +855,7 @@ class RestoreDialog(tk.Toplevel):
         rel = self._rel()
         self.vlist.delete(0, "end")
         self.versions = []
+        self.preview.clear("Seleziona una versione")
         if rel:
             self.vlist.insert("end", "Carico…")
             self._bg(lambda: self.app.engine.list_versions(self.game, rel), self._show_versions)
@@ -881,7 +991,8 @@ class SettingsDialog(tk.Toplevel):
         rows = [("device_name", "Nome di questo PC"),
                 ("poll_interval", "Controlla il cloud ogni (secondi)"),
                 ("debounce_seconds", "Attendi dopo una modifica (secondi)"),
-                ("max_versions", "Versioni da tenere per file")]
+                ("max_versions", "Versioni da tenere per file"),
+                ("snapshots_keep", "Istantanee da tenere per gioco")]
         for i, (key, label) in enumerate(rows):
             ttk.Label(f, text=label).grid(row=i, column=0, sticky="w")
             ttk.Entry(f, textvariable=self.v[key], width=24).grid(row=i, column=1, sticky="w",
@@ -892,7 +1003,7 @@ class SettingsDialog(tk.Toplevel):
         for i, (key, label) in enumerate(checks, start=len(rows)):
             ttk.Checkbutton(f, text=label, variable=self.v[key]).grid(row=i, column=0,
                                                                       columnspan=2, sticky="w",
-                                                                      pady=(6 if i == 4 else 0, 0))
+                                                                      pady=(6 if i == 5 else 0, 0))
         return f
 
     def _tab_system(self, nb):
@@ -913,7 +1024,25 @@ class SettingsDialog(tk.Toplevel):
         ttk.Label(row, text=str(self.app.cfg.app_dir)).pack(side="left")
         ttk.Button(row, text="Apri", command=lambda: system.open_in_file_manager(
             str(self.app.cfg.app_dir))).pack(side="left", padx=6)
+
+        ttk.Separator(f).grid(row=5, column=0, sticky="we", pady=12)
+        ttk.Label(f, text=f"Aggiornamenti (versione installata: {__version__})",
+                  font=("", 10, "bold")).grid(row=6, column=0, sticky="w")
+        ttk.Checkbutton(f, text="Controlla e proponi gli aggiornamenti in automatico",
+                        variable=self.v["auto_update"]).grid(row=7, column=0, sticky="w")
+        tok = ttk.Frame(f)
+        tok.grid(row=8, column=0, sticky="w", pady=(4, 0))
+        ttk.Label(tok, text="Token GitHub").pack(side="left")
+        ttk.Entry(tok, textvariable=self.v["github_token"], width=36, show="•").pack(
+            side="left", padx=4)
+        ttk.Button(tok, text="Controlla ora", command=self._check_now).pack(side="left")
+        _hint(f, "Serve solo se il repository è privato: token 'fine-grained' su GitHub con "
+                 "accesso in sola lettura a Contents del repository savesync.", row=9, column=0)
         return f
+
+    def _check_now(self):
+        self.app.cfg.settings.github_token = self.v["github_token"].get().strip()
+        self.app._check_updates(manual=True)
 
     # ---- helper ----
     def _labeled(self, box, row, label, key, secret=False):
@@ -1010,7 +1139,8 @@ class SettingsDialog(tk.Toplevel):
             return
         limits = {"poll_interval": (10, "controllo del cloud: almeno 10 secondi"),
                   "debounce_seconds": (1, "attesa dopo una modifica: almeno 1 secondo"),
-                  "max_versions": (1, "versioni da tenere: almeno 1")}
+                  "max_versions": (1, "versioni da tenere: almeno 1"),
+                  "snapshots_keep": (1, "istantanee da tenere: almeno 1")}
         for k, (minimum, msg) in limits.items():
             if new[k] < minimum:
                 messagebox.showerror("Impostazioni", msg.capitalize() + ".", parent=self)

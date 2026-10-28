@@ -17,6 +17,9 @@ from pathlib import Path
 
 MANIFEST_URL = "https://raw.githubusercontent.com/mtkennerly/ludusavi-manifest/master/data/manifest.yaml"
 MAX_AGE = 7 * 24 * 3600
+DB_FORMAT = 2  # cambia quando cambia cosa teniamo nella cache (forza un nuovo download)
+STORE_NAMES = {"steam": "Steam", "epic": "Epic", "gog": "GOG", "uplay": "Ubisoft",
+               "origin": "EA"}
 SYSTEM = {"Windows": "windows", "Darwin": "mac"}.get(platform.system(), "linux")
 
 
@@ -31,6 +34,7 @@ class Detected:
     files: int = 0
     extra_folders: list = field(default_factory=list)
     install_dir: str = ""
+    store_cloud: list = field(default_factory=list)  # es. ["Steam", "GOG"]
 
 
 # ---------- download e cache ----------
@@ -51,8 +55,11 @@ def update(app_dir, force=False, progress=lambda msg: None) -> dict:
     import yaml
 
     db = load(app_dir)
-    if db and not force and time.time() - db.get("fetched", 0) < MAX_AGE:
+    fresh = db and db.get("v") == DB_FORMAT and time.time() - db.get("fetched", 0) < MAX_AGE
+    if fresh and not force:
         return db
+    if db.get("v") != DB_FORMAT:
+        db = {}  # formato vecchio: niente ETag, va riscaricato e riconvertito
     progress("Scarico il database dei giochi…")
     headers = {"If-None-Match": db["etag"]} if db.get("etag") else {}
     r = requests.get(MANIFEST_URL, headers=headers, timeout=120)
@@ -64,7 +71,8 @@ def update(app_dir, force=False, progress=lambda msg: None) -> dict:
     progress("Analizzo il database (qualche secondo)…")
     loader = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
     raw = yaml.load(r.content, Loader=loader)
-    db = {"fetched": time.time(), "etag": r.headers.get("ETag", ""), "games": compact(raw)}
+    db = {"v": DB_FORMAT, "fetched": time.time(), "etag": r.headers.get("ETag", ""),
+          "games": compact(raw)}
     _write(app_dir, db)
     return db
 
@@ -107,6 +115,9 @@ def compact(raw: dict) -> dict:
             entry["x"] = exes
         if (g.get("steam") or {}).get("id"):
             entry["s"] = g["steam"]["id"]
+        clouds = sorted(k for k, v in (g.get("cloud") or {}).items() if v is True)
+        if clouds:
+            entry["c"] = clouds
         out[name] = entry
     return out
 
@@ -252,6 +263,12 @@ def install_dir_for(db: dict, name: str, installed: dict = None) -> str:
     return ""
 
 
+def store_cloud(db: dict, name: str) -> list:
+    """Store che sincronizzano già i salvataggi di questo gioco, es. ["Steam", "GOG"]."""
+    g = db.get("games", {}).get(name) or {}
+    return [STORE_NAMES.get(c, c) for c in g.get("c", [])]
+
+
 def _subdirs(folder):
     try:
         return [d for d in Path(folder).iterdir() if d.is_dir()]
@@ -351,7 +368,8 @@ def detect(db: dict, progress=lambda done, total: None) -> list:
                               process=", ".join(dict.fromkeys(exes)), steam_id=g.get("s", 0),
                               mtime=best[2], files=_count(folder, patterns),
                               extra_folders=others,
-                              install_dir=install_dir_for(db, name, all_installs)))
+                              install_dir=install_dir_for(db, name, all_installs),
+                              store_cloud=store_cloud(db, name)))
     progress(total, total)
     found.sort(key=lambda d: d.mtime, reverse=True)
     return found

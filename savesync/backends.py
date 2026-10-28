@@ -40,6 +40,10 @@ class Backend:
         raise NotImplementedError
 
     def list(self, prefix: str) -> list:
+        return sorted(self.sizes(prefix))
+
+    def sizes(self, prefix: str) -> dict:
+        """{chiave: dimensione in byte} per tutte le chiavi che iniziano con prefix."""
         raise NotImplementedError
 
 
@@ -91,17 +95,22 @@ class FolderBackend(Backend):
         if p.exists():
             p.unlink()
 
-    def list(self, prefix):
+    def sizes(self, prefix):
         base = self._p(prefix.rstrip("/"))
         if not base.exists():
-            return []
-        out = []
+            return {}
+        out = {}
         for dirpath, _, files in os.walk(base):
             for f in files:
                 if f.endswith(".partial"):
                     continue
-                rel = Path(dirpath, f).relative_to(self.root).as_posix()
-                out.append(rel)
+                p = Path(dirpath, f)
+                key = p.relative_to(self.root).as_posix()
+                if key.startswith(prefix):
+                    try:
+                        out[key] = p.stat().st_size
+                    except OSError:
+                        pass
         return out
 
 
@@ -146,12 +155,12 @@ class S3Backend(Backend):
     def delete(self, key):
         self.s3.delete_object(Bucket=self.bucket, Key=self._k(key))
 
-    def list(self, prefix):
-        out = []
+    def sizes(self, prefix):
+        out = {}
         paginator = self.s3.get_paginator("list_objects_v2")
         for page in paginator.paginate(Bucket=self.bucket, Prefix=self._k(prefix)):
             for obj in page.get("Contents", []):
-                out.append(obj["Key"][len(self.prefix):])
+                out[obj["Key"][len(self.prefix):]] = obj.get("Size", 0)
         return out
 
 
@@ -265,11 +274,11 @@ class GoogleDriveBackend(_HttpBackend):
             with self._lock:
                 self._ids.pop(key, None)
 
-    def list(self, prefix):
-        out, token = [], None
+    def sizes(self, prefix):
+        out, token = {}, None
         while True:
             params = {"spaces": "appDataFolder", "pageSize": 1000,
-                      "fields": "nextPageToken,files(id,name)", "q": "trashed = false"}
+                      "fields": "nextPageToken,files(id,name,size)", "q": "trashed = false"}
             if token:
                 params["pageToken"] = token
             r = self._req("GET", f"{self.API}/files", params=params).json()
@@ -277,10 +286,10 @@ class GoogleDriveBackend(_HttpBackend):
                 with self._lock:
                     self._ids.setdefault(f["name"], f["id"])
                 if f["name"].startswith(prefix):
-                    out.append(f["name"])
+                    out[f["name"]] = int(f.get("size") or 0)
             token = r.get("nextPageToken")
             if not token:
-                return sorted(set(out))
+                return out
 
 
 class OneDriveBackend(_HttpBackend):
@@ -325,14 +334,15 @@ class OneDriveBackend(_HttpBackend):
     def delete(self, key):
         self._req("DELETE", self._item(key), ok=(200, 204, 404))
 
-    def list(self, prefix):
+    def sizes(self, prefix):
         folder = prefix.rstrip("/")
-        out = []
+        out = {}
         self._walk(folder, out)
-        return sorted(k for k in out if k.startswith(prefix))
+        return {k: v for k, v in out.items() if k.startswith(prefix)}
 
     def _walk(self, folder, out):
-        url = (self._item(folder) if folder else self.ROOT) + "/children?$select=name,folder&$top=999"
+        url = (self._item(folder) if folder else self.ROOT) + \
+            "/children?$select=name,folder,size&$top=999"
         while url:
             r = self._req("GET", url, ok=(200, 404))
             if r.status_code == 404:
@@ -343,7 +353,7 @@ class OneDriveBackend(_HttpBackend):
                 if "folder" in item:
                     self._walk(key, out)
                 else:
-                    out.append(key)
+                    out[key] = int(item.get("size") or 0)
             url = data.get("@odata.nextLink")
 
 

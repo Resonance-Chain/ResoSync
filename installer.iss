@@ -2,7 +2,7 @@
 ; installa in %LOCALAPPDATA%\Programs\SaveSync.
 #define AppVersion GetEnv("SAVESYNC_VERSION")
 #if AppVersion == ""
-  #define AppVersion "0.3.1"
+  #define AppVersion "0.4.0"
 #endif
 
 [Setup]
@@ -45,6 +45,8 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 
 [Run]
 Filename: "{app}\SaveSync.exe"; Description: "Avvia SaveSync"; Flags: nowait postinstall skipifsilent
+; aggiornamento automatico (installer silenzioso): riapre l'app a fine installazione
+Filename: "{app}\SaveSync.exe"; Parameters: "--minimized"; Flags: nowait; Check: WizardSilent
 
 [UninstallRun]
 Filename: "{cmd}"; Parameters: "/C taskkill /IM SaveSync.exe /F"; Flags: runhidden; RunOnceId: "KillApp"

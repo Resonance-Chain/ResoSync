@@ -1,5 +1,25 @@
 # Novità
 
+## 0.4.0
+
+- **Istantanee della cartella**: quando apri un gioco (e prima di ogni ripristino) SaveSync
+  salva una copia completa della cartella dei salvataggi. Tasto destro sul gioco >
+  *Istantanee della cartella…* per tornare "a com'era prima di giocare ieri sera". I file
+  uguali tra un'istantanea e l'altra occupano spazio una volta sola.
+- **Avviso se il gioco è aperto su un altro PC**: notifica appena lo apri; avviando da Steam
+  con le opzioni di avvio, SaveSync chiede conferma prima di far partire il gioco.
+- **Modalità "solo backup"** per i giochi che hanno già il cloud di Steam/Epic/GOG: SaveSync
+  tiene copie e versioni ma non scarica mai nella cartella del gioco. *Rileva giochi* mostra
+  quali giochi hanno già il cloud dello store e chiede che modalità usare.
+- **Aggiornamento automatico**: SaveSync controlla le Release su GitHub e propone
+  "Aggiorna a x.y.z"; un clic e si aggiorna e riapre da solo.
+- **Dettagli del gioco** (doppio clic): ultimo salvataggio e da quale PC, spazio in locale e
+  sul cloud, istantanee, chi lo sta giocando, cronologia delle sincronizzazioni.
+- **Anteprima nel ripristino**: per ogni versione mostra lo screenshot e i dati del
+  salvataggio (livello, luogo, tempo di gioco...) quando il gioco li salva.
+- **Limite di spazio per gioco** e pulsante *Pulisci versioni vecchie*: i salvataggi attuali
+  non vengono mai toccati.
+
 ## 0.3.1
 
 - **Giochi avviati da Vortex, Mod Organizer o altri launcher ora vengono riconosciuti.**

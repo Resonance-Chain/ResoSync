@@ -14,7 +14,7 @@ APP_DIR = Path(os.environ.get("SAVESYNC_HOME", Path.home() / ".savesync"))
 DEFAULT_EXCLUDES = ["*.tmp", "*.temp", "~*", "*.lock", "desktop.ini", "Thumbs.db", ".DS_Store"]
 
 # Questi non finiscono mai in config.json: stanno nel portachiavi di sistema
-SECRET_FIELDS = ("s3_secret_key", "gdrive_client_secret", "passphrase")
+SECRET_FIELDS = ("s3_secret_key", "gdrive_client_secret", "passphrase", "github_token")
 
 
 def slugify(name: str) -> str:
@@ -46,6 +46,8 @@ class Game:
     process: str = ""      # eseguibili del gioco, separati da virgola (es. eldenring.exe)
     launch: str = ""       # comando o URL per avviarlo (es. steam://rungameid/1245620)
     install_dir: str = ""  # cartella d'installazione: qualsiasi exe lì dentro = "in gioco"
+    mode: str = "sync"     # sync = tra i PC | backup = solo copia sul cloud (gioco col suo cloud)
+    max_cloud_mb: int = 0  # limite spazio delle versioni sul cloud (0 = nessun limite)
 
 
 @dataclass
@@ -72,6 +74,10 @@ class Settings:
     sync_only_after_exit: bool = True  # mentre il gioco è aperto non carica nulla
     autostart: bool = False
     close_to_tray: bool = True
+    snapshots_keep: int = 10           # istantanee della cartella tenute per gioco
+    auto_update: bool = True
+    update_repo: str = "Resonance-Chain/savesync"
+    github_token: str = ""             # solo se il repository è privato
 
 
 @dataclass

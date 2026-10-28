@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       release:
-        description: "Versione da pubblicare come Release (es. 0.3.1). Vuoto = solo build"
+        description: "Versione da pubblicare come Release (es. 0.4.0). Vuoto = solo build"
         required: false
         default: ""
 
@@ -39,6 +39,16 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt pyinstaller
+      - name: Versione
+        shell: pwsh
+        run: |
+          # pubblicando una release, la versione scelta finisce dentro l'exe (serve
+          # all'aggiornamento automatico); altrimenti vale quella in savesync/__init__.py
+          $v = "${{ github.event.release.tag_name || inputs.release }}".TrimStart("v")
+          if ($v) { Set-Content savesync/__init__.py "__version__ = `"$v`"" }
+          $v = (Select-String -Path savesync/__init__.py -Pattern '"([^"]+)"').Matches[0].Groups[1].Value
+          "SAVESYNC_VERSION=$v" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "Versione: $v"
       - run: pyinstaller --noconfirm savesync.spec
       - name: Smoke test dell'exe (deve partire e restare vivo)
         shell: pwsh
@@ -51,7 +61,6 @@ jobs:
       - name: Installer
         shell: pwsh
         run: |
-          $env:SAVESYNC_VERSION = "${{ github.event.release.tag_name || inputs.release || '0.3.1' }}".TrimStart("v")
           if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" installer.iss
       - run: Compress-Archive -Path dist\SaveSync -DestinationPath dist\SaveSync-portable.zip

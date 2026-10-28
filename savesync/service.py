@@ -114,6 +114,7 @@ class SyncService:
         self._pending = {}         # game_id -> istante in cui far partire la sync
         self._forced = set()       # sync da fare anche se il gioco è aperto / auto sync spento
         self._playing = {}         # game_id -> True se il processo del gioco è attivo
+        self._heartbeat = {}       # game_id -> ultimo aggiornamento di "sto giocando"
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._observer = None
@@ -129,6 +130,10 @@ class SyncService:
 
     def stop(self):
         self._stop.set()
+        for gid, playing in list(self._playing.items()):
+            game = self.config.get_game(gid)
+            if playing and game:
+                self._presence(game, False)
         if self._observer:
             self._observer.stop()
 
@@ -202,13 +207,44 @@ class SyncService:
             was = self._playing.get(g.id, False)
             self._playing[g.id] = now
             if now and not was:
-                # Appena avviato: scarico subito l'ultima versione (spesso il gioco carica
-                # il salvataggio solo dal menu, quindi si fa ancora in tempo)
                 self.on_event("log", f"[{g.name}] gioco avviato")
+                self._game_started(g)
+                # scarico subito l'ultima versione (spesso il gioco carica il salvataggio
+                # solo dal menu, quindi si fa ancora in tempo)
                 self.request_sync(g.id)
             elif was and not now:
                 self.on_event("log", f"[{g.name}] gioco chiuso, carico i salvataggi")
+                self._presence(g, False)
                 self.request_sync(g.id, delay=2)
+            elif now and time.time() - self._heartbeat.get(g.id, 0) > 120:
+                self._presence(g, True)
+
+    def _game_started(self, g):
+        # 1. istantanea della cartella: "com'era prima di giocare"
+        try:
+            if self.engine.snapshot(g, "avvio del gioco"):
+                self.on_event("log", f"[{g.name}] istantanea della cartella salvata")
+        except Exception as e:
+            self.on_event("log", f"[{g.name}] istantanea non riuscita: {e}")
+        # 2. qualcun altro sta giocando allo stesso gioco?
+        try:
+            others = self.engine.others_playing(g)
+        except Exception:
+            others = []
+        if others:
+            who = ", ".join(others)
+            self.on_event("log", f"[{g.name}] ATTENZIONE: aperto anche su {who}")
+            self.on_event("notify", f"{g.name} è aperto anche su {who}",
+                          "Se salvate nello stesso slot su tutti e due, alla fine vince il "
+                          "salvataggio più recente (l'altro resta in Ripristina versione).")
+        self._presence(g, True)
+
+    def _presence(self, g, playing):
+        try:
+            self.engine.set_playing(g, playing)
+            self._heartbeat[g.id] = time.time() if playing else 0
+        except Exception:
+            pass  # cloud irraggiungibile: riprovo al prossimo giro
 
     def _loop(self):
         last_full = time.time()

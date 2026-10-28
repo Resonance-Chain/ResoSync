@@ -90,6 +90,9 @@ class EncryptedBackend(Backend):
     def list(self, prefix):
         return self.inner.list(prefix)
 
+    def sizes(self, prefix):
+        return self.inner.sizes(prefix)
+
 
 def cloud_is_encrypted(backend: Backend) -> bool:
     return backend.read_bytes(META_KEY) is not None

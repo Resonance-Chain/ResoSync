@@ -122,6 +122,18 @@ Se il gioco ha già delle opzioni di avvio, mettile **dopo** `%command%`.
 password manager. Va attivata su tutti i PC con la stessa passphrase. Se la perdi, i dati sul
 cloud non si recuperano (quelli sui PC restano).
 
+## 8. Strumenti utili
+
+- **Doppio clic su un gioco**: dettagli, spazio usato, cronologia, chi lo sta giocando.
+- **Tasto destro > Istantanee della cartella**: copie complete fatte ogni volta che apri il
+  gioco. Se una sessione rovina tutto (mod, autosave sbagliato), torni a com'era prima.
+- **Tasto destro > Ripristina versione**: versioni dei singoli file, con anteprima dello
+  screenshot e dei dati del salvataggio.
+- **Aggiornamenti**: quando esce una versione nuova compare "Aggiorna a x.y.z" in basso a
+  destra. Aggiorna tutti i PC.
+- **Giochi con il cloud di Steam/Epic/GOG**: puoi metterli in *Solo backup* (doppio clic >
+  Modifica): SaveSync tiene le versioni senza fare a gara con il cloud dello store.
+
 ## Problemi?
 
 | Sintomo | Cosa fare |

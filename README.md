@@ -78,6 +78,18 @@ Nota: per alcuni giochi il database indica il launcher (es. `start_protected_gam
 Ring) invece del gioco vero (`eldenring.exe`). Con *Modifica > Scegli…* prendi il processo giusto
 dalla lista di quelli aperti.
 
+## Funzioni extra
+
+- **Istantanee** della cartella salvataggi a ogni avvio del gioco (deduplicate, ripristino con
+  un clic).
+- **Avviso** se lo stesso gioco è aperto su un altro PC.
+- **Solo backup** per i giochi che hanno già il cloud dello store.
+- **Dettagli** per gioco: spazio, cronologia, ultimo salvataggio.
+- **Anteprima** delle versioni (screenshot e metadati del salvataggio).
+- **Limite di spazio** per gioco e pulizia delle versioni vecchie.
+- **Aggiornamento automatico** dalle Release di GitHub (se il repository è privato serve un
+  token in Impostazioni > Sistema).
+
 ## Sicurezza
 
 - **Cifratura** (Impostazioni > Sicurezza): AES-256-GCM con chiave derivata dalla passphrase
