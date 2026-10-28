@@ -37,7 +37,7 @@ def test_login_flow(tmp_path, monkeypatch):
         posted.append(data)
         if data["grant_type"] == "authorization_code":
             return FakeResp(200, {"access_token": "A1", "refresh_token": "R1", "expires_in": 3600})
-        return FakeResp(200, {"access_token": "A2", "refresh_token": "R2", "expires_in": 3600})
+        return FakeResp(200, {"access_token": "A2", "refresh_token": "REFRESH-SEGRETO-ROTATO", "expires_in": 3600})
     monkeypatch.setattr(oauth.requests, "post", fake_post)
 
     def browser(url):  # il "browser" segue il redirect come farebbe l'utente
@@ -53,7 +53,7 @@ def test_login_flow(tmp_path, monkeypatch):
     # token scaduto -> refresh, e i token restano cifrati su disco
     client._tokens["expires_at"] = 0
     assert client.access_token() == "A2"
-    assert b"R2" not in (tmp_path / "tokens/onedrive.bin").read_bytes()
+    assert b"REFRESH-SEGRETO-ROTATO" not in (tmp_path / "tokens/onedrive.bin").read_bytes()
     fresh = oauth.OAuthClient("onedrive", "cid", vault)
     assert fresh.logged_in and fresh.access_token() == "A2"
     # client id cambiato -> serve un nuovo login
