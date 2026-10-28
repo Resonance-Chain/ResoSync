@@ -266,88 +266,24 @@ class SyncEngine:
                      f"riscarico dal cloud")
             propagate = False
 
-        backup_only = game.mode == "backup"
+        ctx = {"game": game, "local": local, "remote": remote, "base": base, "mtimes": mtimes,
+               "changes": changes, "stats": stats, "propagate": propagate}
+        groups = {}
         for rel in sorted(set(local) | set(remote) | set(base)):
-            if rel in skip:
-                continue
-            L = local.get(rel, {}).get("hash")
-            R = remote.get(rel, {}).get("hash")
-            B = base.get(rel)
-            if backup_only:
-                # Il gioco ha già il suo cloud (Steam, Epic, GOG): SaveSync tiene solo le
-                # copie con le versioni. Carico quello che cambia qui, non scarico mai.
-                if L is not None and L != B and L != R:
-                    try:
-                        self._upload(game, rel, rel in remote, changes, base, mtimes, remote)
-                        stats["up"] += 1
-                    except Exception as e:
-                        stats["errors"] += 1
-                        self.log(f"[{game.name}] errore su {rel}: {e}")
-                elif L is not None:
-                    base[rel] = L
-                    mtimes[rel] = local[rel]["mtime"]
-                continue
-            if L == R:
-                if L is None:
-                    base.pop(rel, None)
-                    mtimes.pop(rel, None)
-                else:
-                    if B != L:
-                        mtimes[rel] = local[rel]["mtime"]
-                    base[rel] = L
-                continue
-
-            try:
-                local_changed, remote_changed = L != B, R != B
-                if local_changed and not remote_changed:
-                    if L is not None:
-                        self._upload(game, rel, rel in remote, changes, base, mtimes, remote)
-                        stats["up"] += 1
-                    elif propagate:
-                        self._delete_remote(game, rel, changes, base, remote)
-                        mtimes.pop(rel, None)
-                        stats["deleted"] += 1
-                    else:  # cancellato in locale ma non propaghiamo: lo rimettiamo
-                        self._download(game, rel, remote[rel], base, mtimes); stats["down"] += 1
-                elif remote_changed and not local_changed:
-                    if R is not None and L is not None and \
-                            remote[rel].get("mtime", 0) < mtimes.get(rel, 0) - 0.001:
-                        # Il cloud propone un salvataggio PIÙ VECCHIO di quello già
-                        # sincronizzato: tipico delle cartelle cloud (Proton Drive, OneDrive,
-                        # Dropbox) quando un manifest vecchio arriva in ritardo e
-                        # sovrascrive quello nuovo. Non si torna indietro: ricarico il mio.
-                        self.log(f"[{game.name}] sul cloud c'è una versione più vecchia di "
-                                 f"{rel}: ricarico quella più recente")
-                        self._upload(game, rel, True, changes, base, mtimes, remote)
-                        stats["up"] += 1
-                    elif R is not None:
-                        self._download(game, rel, remote[rel], base, mtimes); stats["down"] += 1
-                    elif propagate:
-                        self._delete_local(game, rel, base)
-                        mtimes.pop(rel, None)
-                        stats["deleted"] += 1
-                    else:
-                        self._upload(game, rel, False, changes, base, mtimes, remote)
-                        stats["up"] += 1
-                else:
-                    stats["conflicts"] += 1
-                    if L is None:
-                        self._download(game, rel, remote[rel], base, mtimes); stats["down"] += 1
-                    elif R is None:
-                        self._upload(game, rel, False, changes, base, mtimes, remote)
-                        stats["up"] += 1
-                    elif local[rel]["mtime"] >= remote[rel]["mtime"]:
-                        self.log(f"[{game.name}] CONFLITTO su {rel}: vince il locale (più recente), "
-                                 f"quello del cloud resta nelle versioni")
-                        self._upload(game, rel, True, changes, base, mtimes, remote)
-                        stats["up"] += 1
-                    else:
-                        self.log(f"[{game.name}] CONFLITTO su {rel}: vince il cloud "
-                                 f"({remote[rel].get('device')}), il locale va nei backup")
-                        self._download(game, rel, remote[rel], base, mtimes); stats["down"] += 1
-            except Exception as e:
-                stats["errors"] += 1
-                self.log(f"[{game.name}] errore su {rel}: {e}")
+            groups.setdefault(self.group_key(game, rel), []).append(rel)
+        for rels in groups.values():
+            if any(r in skip for r in rels):
+                continue  # un file del salvataggio è bloccato: decido tutto il gruppo dopo
+            if len(rels) == 1 or game.mode == "backup":
+                for rel in rels:
+                    self._sync_one(rel, **ctx)
+            else:
+                try:
+                    self._sync_group(rels, **ctx)
+                except Exception as e:
+                    stats["errors"] += 1
+                    self.log(f"[{game.name}] errore sul salvataggio "
+                             f"{self.group_key(game, rels[0])}: {e}")
 
         if changes:
             self._save_manifest(game.id, changes)
@@ -472,6 +408,185 @@ class SyncEngine:
         return SnapshotStore(self.app_dir, game.id).take(
             game.path, local, reason, self.settings.snapshots_keep)
 
+    # ---------- un file ----------
+    def _sync_one(self, rel, game, local, remote, base, mtimes, changes, stats, propagate):
+        L = local.get(rel, {}).get("hash")
+        R = remote.get(rel, {}).get("hash")
+        B = base.get(rel)
+        if game.mode == "backup":
+            # Il gioco ha già il suo cloud (Steam, Epic, GOG): SaveSync tiene solo le
+            # copie con le versioni. Carico quello che cambia qui, non scarico mai.
+            if L is not None and L != B and L != R:
+                try:
+                    self._upload(game, rel, rel in remote, changes, base, mtimes, remote)
+                    stats["up"] += 1
+                except Exception as e:
+                    stats["errors"] += 1
+                    self.log(f"[{game.name}] errore su {rel}: {e}")
+            elif L is not None:
+                base[rel] = L
+                mtimes[rel] = local[rel]["mtime"]
+            return
+        if L == R:
+            if L is None:
+                base.pop(rel, None)
+                mtimes.pop(rel, None)
+            else:
+                if B != L:
+                    mtimes[rel] = local[rel]["mtime"]
+                base[rel] = L
+            return
+
+        try:
+            local_changed, remote_changed = L != B, R != B
+            if local_changed and not remote_changed:
+                if L is not None:
+                    self._upload(game, rel, rel in remote, changes, base, mtimes, remote)
+                    stats["up"] += 1
+                elif propagate:
+                    self._delete_remote(game, rel, changes, base, remote)
+                    mtimes.pop(rel, None)
+                    stats["deleted"] += 1
+                else:  # cancellato in locale ma non propaghiamo: lo rimettiamo
+                    self._download(game, rel, remote[rel], base, mtimes); stats["down"] += 1
+            elif remote_changed and not local_changed:
+                if R is not None and L is not None and \
+                        remote[rel].get("mtime", 0) < mtimes.get(rel, 0) - 0.001:
+                    # Il cloud propone un salvataggio PIÙ VECCHIO di quello già
+                    # sincronizzato: tipico delle cartelle cloud (Proton Drive, OneDrive,
+                    # Dropbox) quando un manifest vecchio arriva in ritardo e
+                    # sovrascrive quello nuovo. Non si torna indietro: ricarico il mio.
+                    self.log(f"[{game.name}] sul cloud c'è una versione più vecchia di "
+                             f"{rel}: ricarico quella più recente")
+                    self._upload(game, rel, True, changes, base, mtimes, remote)
+                    stats["up"] += 1
+                elif R is not None:
+                    self._download(game, rel, remote[rel], base, mtimes); stats["down"] += 1
+                elif propagate:
+                    self._delete_local(game, rel, base)
+                    mtimes.pop(rel, None)
+                    stats["deleted"] += 1
+                else:
+                    self._upload(game, rel, False, changes, base, mtimes, remote)
+                    stats["up"] += 1
+            else:
+                stats["conflicts"] += 1
+                if L is None:
+                    self._download(game, rel, remote[rel], base, mtimes); stats["down"] += 1
+                elif R is None:
+                    self._upload(game, rel, False, changes, base, mtimes, remote)
+                    stats["up"] += 1
+                elif local[rel]["mtime"] >= remote[rel]["mtime"]:
+                    self.log(f"[{game.name}] CONFLITTO su {rel}: vince il locale (più recente), "
+                             f"quello del cloud resta nelle versioni")
+                    self._upload(game, rel, True, changes, base, mtimes, remote)
+                    stats["up"] += 1
+                else:
+                    self.log(f"[{game.name}] CONFLITTO su {rel}: vince il cloud "
+                             f"({remote[rel].get('device')}), il locale va nei backup")
+                    self._download(game, rel, remote[rel], base, mtimes); stats["down"] += 1
+        except Exception as e:
+            stats["errors"] += 1
+            self.log(f"[{game.name}] errore su {rel}: {e}")
+
+    # ---------- salvataggi fatti di più file ----------
+    @staticmethod
+    def group_key(game, rel) -> str:
+        """Quali file formano UN salvataggio.
+        folder: la sottocartella di primo livello (Cyberpunk: ManualSave-12/sav.dat +
+                metadata.json + screenshot.png); i file sciolti restano singoli
+        name:   stesso nome, estensioni diverse (Skyrim: Save1.ess + Save1.skse)
+        none:   ogni file per conto suo"""
+        mode = getattr(game, "group_by", "folder")
+        if mode == "folder" and "/" in rel:
+            return rel.split("/", 1)[0] + "/"
+        if mode == "name":
+            folder, _, name = rel.rpartition("/")
+            stem = name.split(".", 1)[0]
+            return f"{folder}/{stem}" if folder else stem
+        return rel
+
+    def _sync_group(self, rels, game, local, remote, base, mtimes, changes, stats, propagate):
+        """Come per un file, ma il salvataggio si decide e si applica tutto insieme: mai il
+        sav.dat di un PC con il metadata dell'altro."""
+        ctx = dict(game=game, local=local, remote=remote, base=base, mtimes=mtimes,
+                   changes=changes, stats=stats)
+        L = {r: local[r]["hash"] for r in rels if r in local}
+        R = {r: remote[r]["hash"] for r in rels if r in remote}
+        B = {r: base[r] for r in rels if r in base}
+        name = self.group_key(game, rels[0])
+        if L == R or (L != B and R == B):
+            # tutto uguale, oppure ho cambiato solo io (il cloud è fermo): file per file va bene
+            for r in rels:
+                self._sync_one(r, propagate=propagate, **ctx)
+            return
+        l_time = max((local[r]["mtime"] for r in L), default=0)
+        r_time = max((remote[r].get("mtime", 0) for r in R), default=0)
+        if L == B:  # è cambiato solo il cloud
+            known = max((mtimes.get(r, 0) for r in rels), default=0)
+            if L and R and r_time < known - 0.001:
+                self.log(f"[{game.name}] sul cloud c'è una versione più vecchia del "
+                         f"salvataggio {name}: ricarico quella più recente")
+                self._push_group(rels, **ctx)
+            elif not R and not propagate:
+                self._push_group(rels, **ctx)  # sparito dal cloud: lo rimetto
+            else:
+                self._apply_group(rels, propagate=True, **ctx)
+            return
+        stats["conflicts"] += 1
+        if l_time >= r_time:
+            self.log(f"[{game.name}] CONFLITTO sul salvataggio {name}: vince il locale (più "
+                     f"recente), quello del cloud resta nelle versioni")
+            self._push_group(rels, **ctx)
+        else:
+            self.log(f"[{game.name}] CONFLITTO sul salvataggio {name}: vince il cloud, il "
+                     f"locale va nei backup")
+            self._apply_group(rels, propagate=True, **ctx)
+
+    def _push_group(self, rels, game, local, remote, base, mtimes, changes, stats):
+        """Il mio salvataggio vince intero: carico i miei file e tolgo dal manifest quelli
+        che nel mio non ci sono (restano tra le versioni)."""
+        for r in rels:
+            if r in local:
+                if local[r]["hash"] != remote.get(r, {}).get("hash"):
+                    self._upload(game, r, r in remote, changes, base, mtimes, remote)
+                    stats["up"] += 1
+                else:
+                    base[r] = local[r]["hash"]
+                    mtimes[r] = local[r]["mtime"]
+            elif r in remote:
+                self._delete_remote(game, r, changes, base, remote)
+                mtimes.pop(r, None)
+            else:
+                base.pop(r, None)
+                mtimes.pop(r, None)
+
+    def _apply_group(self, rels, game, local, remote, base, mtimes, changes, stats, propagate):
+        """Il salvataggio del cloud vince intero. Tutto o niente: prima scarico e verifico
+        TUTTI i file, poi li sostituisco insieme. Se ne manca anche uno (con le cartelle
+        cloud può arrivare in ritardo) non tocco niente e riprovo dopo."""
+        todo = [r for r in rels if r in remote and
+                local.get(r, {}).get("hash") != remote[r]["hash"]]
+        fetched = []
+        try:
+            for r in todo:
+                fetched.append((r, self._fetch(game, r, remote[r])))
+        except Exception:
+            for _, tmp in fetched:
+                tmp.unlink(missing_ok=True)
+            raise
+        for r, tmp in fetched:
+            self._commit(game, r, tmp, remote[r], base, mtimes)
+            stats["down"] += 1
+        for r in rels:
+            if r in local and r not in remote:
+                # non fa parte del salvataggio vincente: va nei backup e si toglie
+                self._delete_local(game, r, base)
+                mtimes.pop(r, None)
+            elif r in remote and r not in todo:
+                base[r] = remote[r]["hash"]
+                mtimes[r] = remote[r].get("mtime", 0)
+
     def _upload(self, game, rel, overwrite, changes, base, mtimes, remote):
         src = Path(game.path, rel)
         prefix = self._k_blobs(game.id, rel)
@@ -500,21 +615,29 @@ class SyncEngine:
         mtimes[rel] = st.st_mtime
         self.log(f"[{game.name}] ↑ {rel}")
 
-    def _download(self, game, rel, entry, base, mtimes=None, key=None):
+    def _fetch(self, game, rel, entry, key=None) -> Path:
+        """Scarica in un file temporaneo accanto alla destinazione e verifica l'hash."""
         dst = Path(game.path, rel)
         dst.parent.mkdir(parents=True, exist_ok=True)
         tmp = dst.with_name(dst.name + ".savesync-tmp")
-        # Prima scarico e verifico, POI faccio il backup: se il download fallisce non
-        # riempio i backup di copie identiche (che spingerebbero fuori la cronologia vera)
         try:
             src = key or (entry or {}).get("blob") or self._k_file(game.id, rel)
             try:
                 self.backend.download_file(src, tmp)
             except FileNotFoundError:
                 raise IOError("file non ancora arrivato sul cloud, riprovo più tardi")
-            h = sha256_file(tmp)
-            if key is None and h != entry["hash"]:
+            if key is None and sha256_file(tmp) != entry["hash"]:
                 raise IOError("hash non corrisponde (file sul cloud ancora in caricamento?)")
+        except Exception:
+            tmp.unlink(missing_ok=True)
+            raise
+        return tmp
+
+    def _commit(self, game, rel, tmp, entry, base, mtimes=None, track=True):
+        """Sostituisce il file locale con quello scaricato (facendo prima il backup)."""
+        dst = Path(game.path, rel)
+        try:
+            h = sha256_file(tmp)
             if dst.exists():
                 self._backup_local(game, rel)
             replace_retry(tmp, dst)
@@ -522,11 +645,17 @@ class SyncEngine:
             tmp.unlink(missing_ok=True)
         if entry and entry.get("mtime"):
             os.utime(dst, (entry["mtime"], entry["mtime"]))  # alcuni giochi guardano la data
-        if key is None:
+        if track:
             base[rel] = h
             if mtimes is not None:
                 mtimes[rel] = entry.get("mtime", 0)
         self.log(f"[{game.name}] ↓ {rel}")
+
+    def _download(self, game, rel, entry, base, mtimes=None, key=None):
+        # Prima scarico e verifico, POI faccio il backup: se il download fallisce non
+        # riempio i backup di copie identiche (che spingerebbero fuori la cronologia vera)
+        tmp = self._fetch(game, rel, entry, key)
+        self._commit(game, rel, tmp, entry, base, mtimes, track=key is None)
 
     def _delete_remote(self, game, rel, changes, base, remote):
         # il blob resta come versione: basta toglierlo dal manifest
@@ -684,10 +813,66 @@ class SyncEngine:
                 out["info"] = self._json_info(self._read_version(org, key) or b"")
         return out
 
-    def restore_version(self, game, rel, origin, ref) -> None:
+    @staticmethod
+    def suggest_grouping(folder) -> str:
+        """Guarda come il gioco organizza i file e propone cos'è UN salvataggio."""
+        root = Path(folder)
+        try:
+            subdirs = [d for d in root.iterdir() if d.is_dir()]
+            files = [f.name for f in root.iterdir() if f.is_file()]
+        except OSError:
+            return "folder"
+        multi = [d for d in subdirs if sum(1 for f in d.iterdir() if f.is_file()) >= 2]
+        if len(multi) >= 2:
+            return "folder"  # tante cartelle con più file dentro: ognuna è un salvataggio
+        stems = {}
+        for f in files:
+            stems.setdefault(f.split(".", 1)[0], set()).add(f)
+        if sum(1 for v in stems.values() if len(v) >= 2) >= 2:
+            return "name"  # Save1.ess + Save1.skse, Save2.ess + Save2.skse...
+        return "folder"
+
+    def restore_group(self, game, rel, origin, ref) -> list:
+        """Rimette TUTTI i file del salvataggio di `rel` com'erano nel momento della versione
+        scelta (es. sav.dat + metadata + screenshot). Ritorna i file ripristinati."""
+        key = self.group_key(game, rel)
+        stamp = Path(ref).name.split("__")[0]
+
+        def secs(st):
+            """'20261028-152200-123' -> secondi con i millisecondi (i file dello stesso
+            salvataggio vengono caricati a pochi millisecondi l'uno dall'altro)."""
+            try:
+                t = time.mktime(time.strptime(st[:15], "%Y%m%d-%H%M%S"))
+            except ValueError:
+                return None
+            ms = st[16:19]
+            return t + (int(ms) / 1000 if ms.isdigit() else 0)
+        target = secs(stamp)
+        members = {r for r in set(self.scan_local(game)) | set(self.remote_files(game))
+                   if self.group_key(game, r) == key}
+        plan = {rel: (origin, ref)}
+        for r in members - {rel}:
+            best = None
+            for _, org, k in self.list_versions(game, r):
+                t = secs(Path(k).name.split("__")[0])
+                if t is None or target is None or (org == "backup locale") != \
+                        (origin == "backup locale"):
+                    continue
+                if abs(t - target) <= 600 and (best is None or abs(t - target) < best[0]):
+                    best = (abs(t - target), org, k)
+            if best:
+                plan[r] = (best[1], best[2])
+        with self.lock:
+            self.snapshot(game, f"prima di ripristinare il salvataggio {key}")
+        for r, (org, k) in plan.items():
+            self.restore_version(game, r, org, k, snapshot=False)
+        return sorted(plan)
+
+    def restore_version(self, game, rel, origin, ref, snapshot=True) -> None:
         """Rimette una versione vecchia in locale; alla prossima sync parte verso il cloud."""
         with self.lock:
-            self.snapshot(game, f"prima di ripristinare {rel}")
+            if snapshot:
+                self.snapshot(game, f"prima di ripristinare {rel}")
             dst = Path(game.path, rel)
             if origin == "backup locale":
                 if dst.exists():

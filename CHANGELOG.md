@@ -1,5 +1,19 @@
 # Novità
 
+## 0.5.0
+
+- **Un salvataggio si sincronizza tutto insieme.** Per i giochi che salvano più file per ogni
+  salvataggio (Cyberpunk: `ManualSave-12/` con `sav.dat`, `metadata.json`, `screenshot.png`;
+  Skyrim: `Save1.ess` + `Save1.skse`) SaveSync decide e applica il salvataggio intero: in caso
+  di conflitto vince il salvataggio più recente *completo*, e se il cloud non ha ancora
+  consegnato tutti i file aspetta invece di applicarne metà. Mai lo screenshot di una partita
+  con i dati di un'altra.
+- Scelta per gioco ("Un salvataggio è: una sottocartella / i file con lo stesso nome / ogni file
+  da solo"), suggerita in automatico guardando la cartella.
+- **Ripristina tutto il salvataggio**: da *Ripristina versione* rimette insieme tutti i file
+  dello stesso momento.
+- Il formato sul cloud non cambia: funziona insieme alla 0.4.0 sugli altri PC.
+
 ## 0.4.0
 
 - **Steam Deck e Linux**: versione Linux (`SaveSync-linux-x86_64.tar.gz`) con script di

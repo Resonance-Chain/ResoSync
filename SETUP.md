@@ -129,6 +129,9 @@ cloud non si recuperano (quelli sui PC restano).
   gioco. Se una sessione rovina tutto (mod, autosave sbagliato), torni a com'era prima.
 - **Tasto destro > Ripristina versione**: versioni dei singoli file, con anteprima dello
   screenshot e dei dati del salvataggio.
+- **Salvataggi fatti di più file** (es. Cyberpunk): nella scheda del gioco, "Un salvataggio
+  è" dice a SaveSync quali file vanno sempre insieme. Viene proposto in automatico; in
+  *Ripristina versione* c'è anche "Ripristina tutto il salvataggio".
 - **Aggiornamenti**: quando esce una versione nuova compare "Aggiorna a x.y.z" in basso a
   destra. Aggiorna tutti i PC.
 - **Giochi con il cloud di Steam/Epic/GOG**: puoi metterli in *Solo backup* (doppio clic >

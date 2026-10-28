@@ -542,6 +542,10 @@ class GameDialog(tk.Toplevel):
         self.launch = tk.StringVar(value=game.launch if game else "")
         self.install_dir = tk.StringVar(value=game.install_dir if game else "")
         self.mode = tk.StringVar(value=game.mode if game else "sync")
+        self.group_labels = {"folder": "una sottocartella (es. Cyberpunk: ManualSave-12/)",
+                             "name": "i file con lo stesso nome (es. Save1.ess + Save1.skse)",
+                             "none": "ogni file da solo"}
+        self.group_by = tk.StringVar(value=self.group_labels[game.group_by if game else "folder"])
         self.max_mb = tk.StringVar(value=str(game.max_cloud_mb if game else 0))
         self.enabled = tk.BooleanVar(value=game.enabled if game else True)
 
@@ -599,6 +603,13 @@ class GameDialog(tk.Toplevel):
             _hint(f, f"Questo gioco ha già il cloud di {', '.join(stores)}. Se lo usi su tutti i "
                      "PC conviene 'Solo backup', così i due sistemi non si pestano i piedi.",
                   row=12, column=1, columnspan=2)
+        ttk.Label(f, text="Un salvataggio è").grid(row=16, column=0, sticky="w", pady=(6, 0))
+        gb = ttk.Combobox(f, textvariable=self.group_by, state="readonly", width=52,
+                          values=list(self.group_labels.values()))
+        gb.grid(row=16, column=1, columnspan=2, sticky="w", pady=(6, 0))
+        _hint(f, "I file di uno stesso salvataggio si sincronizzano sempre insieme: mai lo "
+                 "screenshot di una partita con i dati di un'altra.", row=17, column=1,
+              columnspan=2)
         ttk.Label(f, text="Limite spazio versioni").grid(row=13, column=0, sticky="w", pady=(6, 0))
         lim = ttk.Frame(f)
         lim.grid(row=13, column=1, sticky="w", pady=(6, 0))
@@ -609,7 +620,7 @@ class GameDialog(tk.Toplevel):
             row=14, column=1, sticky="w", pady=6)
 
         btns = ttk.Frame(f)
-        btns.grid(row=15, column=0, columnspan=3, sticky="e", pady=(8, 0))
+        btns.grid(row=18, column=0, columnspan=3, sticky="e", pady=(8, 0))
         ttk.Button(btns, text="Annulla", command=self.destroy).pack(side="right")
         ttk.Button(btns, text="Salva", command=self._save).pack(side="right", padx=4)
         self.grab_set()
@@ -623,6 +634,8 @@ class GameDialog(tk.Toplevel):
         d = filedialog.askdirectory(parent=self, initialdir=self.path.get() or str(Path.home()))
         if d:
             self.path.set(os.path.normpath(d))
+            if not self.game:
+                self.group_by.set(self.group_labels[SyncEngine.suggest_grouping(d)])
             if not self.name.get():
                 self.name.set(Path(d).name)
 
@@ -668,7 +681,9 @@ class GameDialog(tk.Toplevel):
                     excludes=split(self.excludes.get()), enabled=self.enabled.get(),
                     process=self.process.get().strip(), launch=self.launch.get().strip(),
                     install_dir=self.install_dir.get().strip(), mode=self.mode.get(),
-                    max_cloud_mb=max_mb)
+                    max_cloud_mb=max_mb,
+                    group_by=next(k for k, v in self.group_labels.items()
+                                  if v == self.group_by.get()))
         if not Path(path).exists() and not messagebox.askyesno(
                 "Cartella inesistente", "La cartella non esiste: crearla e scaricarci i salvataggi "
                 "dal cloud?", parent=self):
@@ -799,7 +814,8 @@ class DetectDialog(tk.Toplevel):
             launch = f"steam://rungameid/{d.steam_id}" if d.steam_id else ""
             game = Game(id=slugify(d.name), name=d.name, path=d.folder, patterns=d.patterns,
                         process=d.process, launch=launch, install_dir=d.install_dir,
-                        mode="backup" if backup and d.store_cloud else "sync")
+                        mode="backup" if backup and d.store_cloud else "sync",
+                        group_by=SyncEngine.suggest_grouping(d.folder))
             if self.app._save_game(None, game, quiet=True):
                 added += 1
         self._fill()
@@ -838,6 +854,8 @@ class RestoreDialog(tk.Toplevel):
                   foreground="gray").pack(side="left")
         ttk.Button(bf, text="Chiudi", command=self.destroy).pack(side="right")
         ttk.Button(bf, text="Ripristina", command=self._restore).pack(side="right", padx=4)
+        self.group_button = ttk.Button(bf, text="Ripristina tutto il salvataggio",
+                                       command=self._restore_group)
         self._bg(lambda: sorted(set(app.engine.remote_files(game)) |
                                 set(app.engine.scan_local(game))), self._show_files)
 
@@ -848,6 +866,10 @@ class RestoreDialog(tk.Toplevel):
         rel, sel = self._rel(), self.vlist.curselection()
         if not rel or not sel or not self.versions:
             return
+        if SyncEngine.group_key(self.game, rel) != rel:
+            self.group_button.pack(side="right", padx=4)
+        else:
+            self.group_button.pack_forget()
         _, origin, ref = self.versions[sel[0]]
         self.preview.clear("Carico l'anteprima…")
         run_bg(self, lambda: self.app.engine.preview(self.game, rel, origin, ref),
@@ -883,6 +905,26 @@ class RestoreDialog(tk.Toplevel):
             self.vlist.insert("end", f"{pretty}   [{origin}]")
         if not versions:
             self.vlist.insert("end", "(nessuna versione precedente)")
+
+    def _restore_group(self):
+        rel, sel = self._rel(), self.vlist.curselection()
+        if not rel or not sel or not self.versions:
+            return
+        _, origin, ref = self.versions[sel[0]]
+        key = SyncEngine.group_key(self.game, rel)
+        if not messagebox.askyesno("Ripristina salvataggio", f"Rimettere TUTTI i file del "
+                                   f"salvataggio {key} com'erano in quel momento?\n\nPrima ne "
+                                   "faccio un'istantanea, così puoi tornare indietro.",
+                                   parent=self):
+            return
+
+        def done(files):
+            self.app._log(f"[{self.game.name}] ripristinato il salvataggio {key}: "
+                          f"{', '.join(files)}")
+            if self.app.service:
+                self.app.service.request_sync(self.game.id)
+            self.destroy()
+        run_bg(self, lambda: self.app.engine.restore_group(self.game, rel, origin, ref), done)
 
     def _restore(self):
         rel = self._rel()
