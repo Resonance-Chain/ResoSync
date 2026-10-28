@@ -7,6 +7,11 @@ on:
   release:
     types: [published]  # pubblicando una Release si compilano e allegano installer e zip
   workflow_dispatch:
+    inputs:
+      release:
+        description: "Versione da pubblicare come Release (es. 0.2.0). Vuoto = solo build"
+        required: false
+        default: ""
 
 jobs:
   test:
@@ -46,7 +51,7 @@ jobs:
       - name: Installer
         shell: pwsh
         run: |
-          $env:SAVESYNC_VERSION = if ("${{ github.event_name }}" -eq "release") { "${{ github.event.release.tag_name }}".TrimStart("v") } else { "0.2.0" }
+          $env:SAVESYNC_VERSION = "${{ github.event.release.tag_name || inputs.release || '0.2.0' }}".TrimStart("v")
           if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" installer.iss
       - run: Compress-Archive -Path dist\SaveSync -DestinationPath dist\SaveSync-portable.zip
@@ -57,10 +62,20 @@ jobs:
           path: |
             dist/SaveSync-Setup-*.exe
             dist/SaveSync-portable.zip
-      - if: github.event_name == 'release'
+      - if: github.event_name == 'release' || inputs.release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.release.tag_name }}
+          tag_name: ${{ github.event.release.tag_name || format('v{0}', inputs.release) }}
+          name: SaveSync ${{ github.event.release.tag_name || format('v{0}', inputs.release) }}
+          target_commitish: ${{ github.sha }}
+          body: |
+            **Download:** `SaveSync-Setup-*.exe` (installer, consigliato) oppure `SaveSync-portable.zip`.
+
+            Windows mostrerà "Windows ha protetto il PC" perché l'exe non è firmato:
+            *Ulteriori informazioni > Esegui comunque*.
+
+            Guida passo passo: [SETUP.md](https://github.com/${{ github.repository }}/blob/main/SETUP.md)
+          generate_release_notes: true
           files: |
             dist/SaveSync-Setup-*.exe
             dist/SaveSync-portable.zip

@@ -13,8 +13,8 @@ Il programma viene compilato in automatico da GitHub (gratis) ogni volta che il 
    - `SaveSync-Setup-x.y.z.exe`: l'installer (consigliato)
    - `SaveSync-portable.zip`: la versione senza installazione
 
-> Nuova versione? Su GitHub *Releases > Draft a new release*,
-> crea un tag tipo `v0.3.0` e pubblica: in 10 minuti la pipeline ci allega installer e zip.
+> Nuova versione? Su GitHub *Actions > Test e build > Run workflow*, scrivi la versione (es. `0.3.0`)
+> e avvia: in 10 minuti compare la Release con installer e zip.
 
 ## 2. Installare
 
