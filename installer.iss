@@ -2,7 +2,7 @@
 ; installa in %LOCALAPPDATA%\Programs\SaveSync.
 #define AppVersion GetEnv("SAVESYNC_VERSION")
 #if AppVersion == ""
-  #define AppVersion "0.3.0"
+  #define AppVersion "0.3.1"
 #endif
 
 [Setup]

@@ -15,7 +15,7 @@ from tkinter import messagebox, ttk
 from .backends import make_backend
 from .config import Config, process_names
 from .engine import SyncEngine
-from .service import running_process_names
+from .service import is_game_running, running_processes
 
 
 class Splash:
@@ -109,12 +109,14 @@ def _proc_name(proc):
 def _wait_game(ui, game, proc):
     started = time.time()
     names = process_names(game.process)
+    can_watch = bool(names or game.install_dir)
+    running = lambda: is_game_running(game, running_processes(bool(game.install_dir)))
     is_the_game = False
     if proc is not None:
         is_the_game = _proc_name(proc) in names
         while proc.poll() is None:
             ui.sleep(1)
-    if not names:
+    if not can_watch:
         if proc is None:
             ui.root.deiconify()
             messagebox.showinfo("SaveSync", f"Premi OK quando hai finito di giocare a "
@@ -123,9 +125,9 @@ def _wait_game(ui, game, proc):
     # Il primo processo era solo un launcher? Aspetta che compaia il gioco vero
     if proc is None or (not is_the_game and time.time() - started < 60):
         deadline = time.time() + 45
-        while time.time() < deadline and not (names & running_process_names()):
+        while time.time() < deadline and not running():
             ui.sleep(2)
-    while names & running_process_names():
+    while running():
         ui.sleep(3)
 
 

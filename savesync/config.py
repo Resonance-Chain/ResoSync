@@ -45,6 +45,7 @@ class Game:
     enabled: bool = True
     process: str = ""      # eseguibili del gioco, separati da virgola (es. eldenring.exe)
     launch: str = ""       # comando o URL per avviarlo (es. steam://rungameid/1245620)
+    install_dir: str = ""  # cartella d'installazione: qualsiasi exe lì dentro = "in gioco"
 
 
 @dataclass

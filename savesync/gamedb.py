@@ -30,6 +30,7 @@ class Detected:
     mtime: float = 0.0
     files: int = 0
     extra_folders: list = field(default_factory=list)
+    install_dir: str = ""
 
 
 # ---------- download e cache ----------
@@ -193,6 +194,71 @@ def steam_libraries() -> list:
     return out
 
 
+def installed_games() -> dict:
+    """Cartelle d'installazione dei giochi su questo PC: {nome cartella minuscolo: [percorsi]}.
+    Fonti: librerie Steam, manifest di Epic, registro e cartella predefinita di GOG."""
+    found = {}
+
+    def add(path):
+        path = Path(path)
+        if path.is_dir():
+            found.setdefault(path.name.lower(), []).append(str(path))
+
+    for lib in steam_libraries():
+        for d in _subdirs(lib / "steamapps" / "common"):
+            add(d)
+    if SYSTEM == "windows":
+        program_data = Path(os.environ.get("PROGRAMDATA") or "C:/ProgramData")
+        for item in (program_data / "Epic" / "EpicGamesLauncher" / "Data" / "Manifests").glob(
+                "*.item"):
+            try:
+                loc = json.loads(item.read_text(encoding="utf-8", errors="ignore")).get(
+                    "InstallLocation")
+                if loc:
+                    add(loc)
+            except (OSError, ValueError):
+                pass
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                                r"SOFTWARE\WOW6432Node\GOG.com\Games") as root:
+                for i in range(winreg.QueryInfoKey(root)[0]):
+                    try:
+                        with winreg.OpenKey(root, winreg.EnumKey(root, i)) as k:
+                            add(winreg.QueryValueEx(k, "path")[0])
+                    except OSError:
+                        pass
+        except OSError:
+            pass
+        pf86 = Path(os.environ.get("ProgramFiles(x86)") or "C:/Program Files (x86)")
+        pf = Path(os.environ.get("ProgramFiles") or "C:/Program Files")
+        for root in (pf86 / "GOG Galaxy" / "Games", pf / "Epic Games", Path("C:/GOG Games")):
+            for d in _subdirs(root):
+                add(d)
+    for k in found:
+        found[k] = list(dict.fromkeys(found[k]))
+    return found
+
+
+def install_dir_for(db: dict, name: str, installed: dict = None) -> str:
+    """Cartella d'installazione di un gioco del database, se è installato su questo PC."""
+    g = db.get("games", {}).get(name)
+    if not g:
+        return ""
+    installed = installed if installed is not None else installed_games()
+    for d in g.get("d", []):
+        if installed.get(d.lower()):
+            return installed[d.lower()][0]
+    return ""
+
+
+def _subdirs(folder):
+    try:
+        return [d for d in Path(folder).iterdir() if d.is_dir()]
+    except OSError:
+        return []
+
+
 _MAGIC = re.compile(r"[*?\[]")
 
 
@@ -241,6 +307,10 @@ def detect(db: dict, progress=lambda done, total: None) -> list:
             pass
 
     found = []
+    try:
+        all_installs = installed_games()
+    except Exception:
+        all_installs = {}
     total = len(games)
     for i, (name, g) in enumerate(games.items()):
         if i % 500 == 0:
@@ -280,7 +350,8 @@ def detect(db: dict, progress=lambda done, total: None) -> list:
         found.append(Detected(name=name, folder=folder, patterns=patterns,
                               process=", ".join(dict.fromkeys(exes)), steam_id=g.get("s", 0),
                               mtime=best[2], files=_count(folder, patterns),
-                              extra_folders=others))
+                              extra_folders=others,
+                              install_dir=install_dir_for(db, name, all_installs)))
     progress(total, total)
     found.sort(key=lambda d: d.mtime, reverse=True)
     return found

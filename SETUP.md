@@ -80,15 +80,18 @@ Per chi lo conosce già: bucket, endpoint, access key e secret key. Cloudflare R
 Gioco non trovato? **Aggiungi gioco** e scegli la cartella dei salvataggi a mano
 (cercala su [PCGamingWiki](https://www.pcgamingwiki.com/), sezione "Save game data location").
 
-### Controlla il processo del gioco
+### Come SaveSync capisce che stai giocando
 
-Per ogni gioco, doppio clic > **Processo del gioco**. Serve perché SaveSync sappia quando giochi:
+Serve per non toccare i salvataggi durante la partita e sincronizzarli all'avvio e alla chiusura.
+SaveSync guarda la **cartella d'installazione** del gioco: qualsiasi exe che parte da lì conta
+come "in gioco", anche se lo avvii da **Vortex**, Mod Organizer o un altro launcher.
 
-1. Avvia il gioco.
-2. In SaveSync: doppio clic sul gioco > **Scegli…** > trova l'exe del gioco nella lista > **Salva**.
+Per i giochi di Steam, Epic e GOG la cartella viene trovata da sola (nella colonna *Processo*
+compare tra parentesi quadre, es. `[Cyberpunk 2077]`). Per gli altri giochi:
+doppio clic sul gioco > **Cartella d'installazione** > **Sfoglia…** > la cartella dove è
+installato > **Salva**. In alternativa, con il gioco aperto: **Processo del gioco** > **Scegli…**.
 
-Esempio: per Elden Ring il database suggerisce `start_protected_game.exe`, ma quello giusto è
-`eldenring.exe`.
+Per controllare: avvia il gioco e guarda il riquadro *Attività*, deve comparire "gioco avviato".
 
 ## 5. Steam (consigliato)
 

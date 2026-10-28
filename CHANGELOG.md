@@ -1,5 +1,17 @@
 # Novità
 
+## 0.3.1
+
+- **Giochi avviati da Vortex, Mod Organizer o altri launcher ora vengono riconosciuti.**
+  Prima SaveSync cercava solo l'exe indicato dal database, che spesso è il launcher
+  (es. `redprelauncher.exe` per Cyberpunk 2077, `start_protected_game.exe` per Elden Ring):
+  se il gioco partiva in un altro modo non si accorgeva che stavi giocando.
+  Ora conta come "in gioco" qualsiasi exe che parte dalla cartella d'installazione del gioco.
+- La cartella d'installazione viene trovata da sola per i giochi di Steam, Epic e GOG, anche
+  per quelli già aggiunti con le versioni precedenti.
+- Per i giochi con anti-cheat di cui Windows non rivela il percorso dell'exe, il confronto
+  avviene sui nomi degli exe presenti nella cartella del gioco.
+
 ## 0.3.0
 
 **Aggiorna SaveSync su tutti i PC**: il formato sul cloud cambia. La 0.3.0 legge e converte

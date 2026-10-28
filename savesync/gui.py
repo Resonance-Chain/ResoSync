@@ -132,7 +132,8 @@ class App(tk.Tk):
         self.tree.delete(*self.tree.get_children())
         for g in self.cfg.games:
             st = self.status.get(g.id, "In attesa" if g.enabled else "Disattivato")
-            self.tree.insert("", "end", iid=g.id, values=(g.name, g.path, g.process, st))
+            watch = g.process or (f"[{Path(g.install_dir).name}]" if g.install_dir else "")
+            self.tree.insert("", "end", iid=g.id, values=(g.name, g.path, watch, st))
         if sel and self.tree.exists(sel[0]):
             self.tree.selection_set(sel[0])
         s = self.cfg.settings
@@ -218,6 +219,15 @@ class App(tk.Tk):
                         self.after(60000, self._start_service)
                     elif not isinstance(err, NeedsLogin):  # passphrase sbagliata, ecc.
                         messagebox.showerror("SaveSync", f"Impossibile usare il cloud:\n{err}")
+                elif kind == "install_dirs":
+                    for gid, folder in args[0].items():
+                        g = self.cfg.get_game(gid)
+                        if g and not g.install_dir:
+                            g.install_dir = folder
+                            self._log(f"[{g.name}] cartella d'installazione trovata: {folder}")
+                    if args[0]:
+                        self.cfg.save()
+                        self._refresh()
                 elif kind == "show":
                     self._show()
                 elif kind == "sync_all":
@@ -264,7 +274,24 @@ class App(tk.Tk):
         self.service = SyncService(self.cfg, engine, self._emit)
         self.service.start()
         self._log("Servizio di sincronizzazione avviato")
+        self._fill_install_dirs()
         self._refresh()
+
+    def _fill_install_dirs(self):
+        """Giochi aggiunti con versioni vecchie: cerco da solo la cartella d'installazione."""
+        missing = [g for g in self.cfg.games if not g.install_dir]
+        db = gamedb.load(self.cfg.app_dir)
+        if not missing or not db:
+            return
+
+        def work():
+            try:
+                installed = gamedb.installed_games()
+                found = {g.id: gamedb.install_dir_for(db, g.name, installed) for g in missing}
+                self._emit("install_dirs", {k: v for k, v in found.items() if v})
+            except Exception as e:
+                self._emit("log", f"Ricerca cartelle d'installazione fallita: {e}")
+        threading.Thread(target=work, daemon=True).start()
 
     def _first_run(self):
         self._show()
@@ -432,6 +459,7 @@ class GameDialog(tk.Toplevel):
         self.excludes = tk.StringVar(value=", ".join(game.excludes if game else default_ex))
         self.process = tk.StringVar(value=game.process if game else "")
         self.launch = tk.StringVar(value=game.launch if game else "")
+        self.install_dir = tk.StringVar(value=game.install_dir if game else "")
         self.enabled = tk.BooleanVar(value=game.enabled if game else True)
 
         ttk.Label(f, text="Nome del gioco").grid(row=0, column=0, sticky="w")
@@ -462,23 +490,33 @@ class GameDialog(tk.Toplevel):
         ttk.Button(f, text="Scegli…", command=self._pick_process).grid(row=6, column=2,
                                                                        sticky="w", padx=(4, 0),
                                                                        pady=(8, 3))
-        _hint(f, "Es. eldenring.exe. Mentre il gioco è aperto non carico nulla (i file potrebbero "
-                 "essere a metà): sincronizzo appena lo apri e appena lo chiudi.",
-              row=7, column=1, columnspan=2)
-        ttk.Label(f, text="Comando di avvio").grid(row=8, column=0, sticky="w")
-        ttk.Entry(f, textvariable=self.launch).grid(row=8, column=1, columnspan=2, sticky="we",
+        ttk.Label(f, text="Cartella d'installazione").grid(row=7, column=0, sticky="w")
+        ttk.Entry(f, textvariable=self.install_dir).grid(row=7, column=1, sticky="we", pady=3)
+        ttk.Button(f, text="Sfoglia…", command=self._browse_install).grid(
+            row=7, column=2, sticky="w", padx=(4, 0))
+        _hint(f, "Basta uno dei due. Con la cartella d'installazione qualsiasi exe che parte da lì "
+                 "conta come 'in gioco': funziona anche avviando da Vortex, Mod Organizer o altri "
+                 "launcher. Mentre giochi non carico nulla; sincronizzo all'avvio e alla chiusura.",
+              row=8, column=1, columnspan=2)
+        ttk.Label(f, text="Comando di avvio").grid(row=9, column=0, sticky="w")
+        ttk.Entry(f, textvariable=self.launch).grid(row=9, column=1, columnspan=2, sticky="we",
                                                     pady=3)
         _hint(f, "Facoltativo, per 'Avvia gioco'. Es. steam://rungameid/1245620 oppure il "
-                 "percorso dell'exe.", row=9, column=1, columnspan=2)
+                 "percorso dell'exe.", row=10, column=1, columnspan=2)
 
         ttk.Checkbutton(f, text="Sincronizzazione attiva", variable=self.enabled).grid(
-            row=10, column=1, sticky="w", pady=6)
+            row=11, column=1, sticky="w", pady=6)
 
         btns = ttk.Frame(f)
-        btns.grid(row=11, column=0, columnspan=3, sticky="e", pady=(8, 0))
+        btns.grid(row=12, column=0, columnspan=3, sticky="e", pady=(8, 0))
         ttk.Button(btns, text="Annulla", command=self.destroy).pack(side="right")
         ttk.Button(btns, text="Salva", command=self._save).pack(side="right", padx=4)
         self.grab_set()
+
+    def _browse_install(self):
+        d = filedialog.askdirectory(parent=self, initialdir=self.install_dir.get() or None)
+        if d:
+            self.install_dir.set(os.path.normpath(d))
 
     def _browse(self):
         d = filedialog.askdirectory(parent=self, initialdir=self.path.get() or str(Path.home()))
@@ -519,7 +557,8 @@ class GameDialog(tk.Toplevel):
         game = Game(id=self.game.id if self.game else slugify(name), name=name, path=path,
                     patterns=split(self.patterns.get()) or ["*"],
                     excludes=split(self.excludes.get()), enabled=self.enabled.get(),
-                    process=self.process.get().strip(), launch=self.launch.get().strip())
+                    process=self.process.get().strip(), launch=self.launch.get().strip(),
+                    install_dir=self.install_dir.get().strip())
         if not Path(path).exists() and not messagebox.askyesno(
                 "Cartella inesistente", "La cartella non esiste: crearla e scaricarci i salvataggi "
                 "dal cloud?", parent=self):
@@ -632,7 +671,7 @@ class DetectDialog(tk.Toplevel):
             d = self.results[int(iid)]
             launch = f"steam://rungameid/{d.steam_id}" if d.steam_id else ""
             game = Game(id=slugify(d.name), name=d.name, path=d.folder, patterns=d.patterns,
-                        process=d.process, launch=launch)
+                        process=d.process, launch=launch, install_dir=d.install_dir)
             if self.app._save_game(None, game, quiet=True):
                 added += 1
         self._fill()

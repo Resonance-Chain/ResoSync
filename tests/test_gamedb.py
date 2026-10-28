@@ -62,3 +62,26 @@ def test_detect_windows(monkeypatch, tmp_path):
     assert found["Hollow Knight"].patterns == ["*.dat"]
     assert found["Hollow Knight"].files == 1
     assert Path(found["Old Game [GOTY]"].folder) == save
+
+
+def test_install_dirs(monkeypatch, tmp_path):
+    lib = tmp_path / "SteamLibrary"
+    (lib / "steamapps/common/Cyberpunk 2077/bin/x64").mkdir(parents=True)
+    monkeypatch.setattr(gamedb, "steam_libraries", lambda: [lib])
+    monkeypatch.setattr(gamedb, "SYSTEM", "linux")  # niente Epic/GOG/registro nel test
+    db = {"games": gamedb.compact({"Cyberpunk 2077": {
+        "files": {"<home>/Saved Games/CD Projekt Red/Cyberpunk 2077": {"tags": ["save"]}},
+        "installDir": {"Cyberpunk 2077": {}},
+        "launch": {"<base>/redprelauncher.exe": [{"when": [{"os": "windows"}]}]}}})}
+    installed = gamedb.installed_games()
+    assert installed["cyberpunk 2077"] == [str(lib / "steamapps/common/Cyberpunk 2077")]
+    assert gamedb.install_dir_for(db, "Cyberpunk 2077", installed) == \
+        str(lib / "steamapps/common/Cyberpunk 2077")
+    assert gamedb.install_dir_for(db, "Gioco inesistente", installed) == ""
+    # anche "Rileva giochi" lo compila
+    saves = tmp_path / "home/Saved Games/CD Projekt Red/Cyberpunk 2077"
+    (saves / "ManualSave-1").mkdir(parents=True)
+    (saves / "ManualSave-1/sav.dat").write_text("x")
+    monkeypatch.setattr(gamedb, "placeholders", lambda: {"<home>": tmp_path / "home"})
+    found = gamedb.detect(db)
+    assert found[0].install_dir == str(lib / "steamapps/common/Cyberpunk 2077")

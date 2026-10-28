@@ -1,5 +1,6 @@
 """Servizio in background: guarda cartelle e processi dei giochi e lancia le sync quando serve."""
 import os
+import re
 import threading
 import time
 from pathlib import Path
@@ -23,17 +24,70 @@ except ImportError:
 BUSY_RETRY = 15  # secondi prima di riprovare se un altro PC tiene il lock
 
 
-def running_process_names() -> set:
+def running_processes(with_paths=True) -> list:
+    """[(nome senza .exe in minuscolo, percorso dell'exe normalizzato o "")]"""
     if psutil is None:
-        return set()
-    names = set()
+        return []
+    out = []
     me = os.getpid()
-    for p in psutil.process_iter(["name"]):
+    attrs = ["name", "exe"] if with_paths else ["name"]
+    for p in psutil.process_iter(attrs):
         if p.pid == me:
             continue
         n = (p.info.get("name") or "").lower()
-        names.add(n[:-4] if n.endswith(".exe") else n)
+        exe = p.info.get("exe") or "" if with_paths else ""
+        out.append((n[:-4] if n.endswith(".exe") else n,
+                    os.path.normcase(os.path.normpath(exe)) if exe else ""))
+    return out
+
+
+def running_process_names() -> set:
+    return {n for n, _ in running_processes(with_paths=False)}
+
+
+# exe che si trovano in tante cartelle di giochi: non bastano a dire "questo gioco è aperto"
+_GENERIC_EXE = re.compile(r"crash|report|unins|setup|install|redist|vc_?redist|dxsetup|"
+                          r"prereq|helper|update|launcherpatcher|easyanticheat|battleye|"
+                          r"be_service|eac_?launcher|cefprocess|webhelper|ue4prereq|dotnet",
+                          re.IGNORECASE)
+_exe_cache = {}  # cartella -> (istante, {nomi exe})
+
+
+def install_exe_names(folder: str, max_files=5000, ttl=600) -> set:
+    """Nomi degli exe nella cartella d'installazione (per i processi di cui Windows non
+    rivela il percorso, es. giochi con anti-cheat protetto)."""
+    now = time.time()
+    hit = _exe_cache.get(folder)
+    if hit and now - hit[0] < ttl:
+        return hit[1]
+    names, seen = set(), 0
+    for dirpath, dirs, files in os.walk(folder):
+        for f in files:
+            seen += 1
+            low = f.lower()
+            if low.endswith(".exe") and not _GENERIC_EXE.search(low):
+                names.add(low[:-4])
+        if seen > max_files:
+            break
+    _exe_cache[folder] = (now, names)
     return names
+
+
+def is_game_running(game, procs) -> bool:
+    """Il gioco è aperto se c'è un processo col nome indicato, oppure un qualsiasi exe che
+    parte dalla sua cartella d'installazione (così funziona con Vortex, Mod Organizer,
+    launcher che si chiudono subito, exe con nomi diversi da quelli del database)."""
+    names = process_names(game.process)
+    folder = os.path.normcase(os.path.normpath(game.install_dir)) if game.install_dir else ""
+    for name, exe in procs:
+        if name in names:
+            return True
+        if folder and exe and exe.startswith(folder + os.sep):
+            return True
+    if folder:  # percorso non disponibile (processo protetto): confronto i nomi
+        installed = install_exe_names(game.install_dir)
+        return any(not exe and name in installed for name, exe in procs)
+    return False
 
 
 class _Handler(FileSystemEventHandler):
@@ -136,15 +190,15 @@ class SyncService:
             self._snapshots[g.id] = snap
 
     def _check_processes(self):
-        games = [g for g in self.config.games if g.enabled and g.process]
+        games = [g for g in self.config.games if g.enabled and (g.process or g.install_dir)]
         if not games:
             return
         try:
-            running = running_process_names()
+            procs = running_processes(with_paths=any(g.install_dir for g in games))
         except Exception:
             return
         for g in games:
-            now = bool(process_names(g.process) & running)
+            now = is_game_running(g, procs)
             was = self._playing.get(g.id, False)
             self._playing[g.id] = now
             if now and not was:
