@@ -132,7 +132,7 @@ class _Handler(FileSystemEventHandler):
         if event.event_type in ("opened", "closed_no_write"):
             return  # semplici letture (anche le nostre), niente da sincronizzare
         path = str(getattr(event, "dest_path", "") or event.src_path)
-        if path.endswith(".savesync-tmp"):
+        if path.endswith(".resosync-tmp"):
             return  # sono i nostri download
         if not event.is_directory:
             self.service.notify(self.game_id)

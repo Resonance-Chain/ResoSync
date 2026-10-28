@@ -1,6 +1,6 @@
 import json
 
-from savesync.config import Config, Game, process_names
+from resosync.config import Config, Game, process_names
 
 
 def test_secrets_not_in_json(tmp_path):
@@ -35,7 +35,7 @@ def test_process_names():
 def test_vault_file_is_private(tmp_path):
     import os
     import stat
-    from savesync.vault import Vault
+    from resosync.vault import Vault
     v = Vault(tmp_path)
     v.set("passphrase", "segreta")
     v.save_tokens("gdrive", {"refresh_token": "x"})

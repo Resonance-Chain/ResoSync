@@ -1,4 +1,4 @@
-# Build: pyinstaller savesync.spec   ->  dist/SaveSync/SaveSync.exe
+# Build: pyinstaller resosync.spec   ->  dist/ResoSync/ResoSync.exe
 # Cartella (onedir) e non file unico: parte più in fretta (conta quando lo lanci da Steam)
 # e gli antivirus lo segnalano molto meno.
 import sys
@@ -12,6 +12,6 @@ hidden = tray + collect_submodules("keyring.backends") + collect_submodules("wat
 
 a = Analysis(["main.py"], hiddenimports=hidden, excludes=["pytest", "tkinter.test"])
 pyz = PYZ(a.pure)
-exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="SaveSync", console=False,
+exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="ResoSync", console=False,
           icon="assets/icon.ico", upx=False, version=None)
-coll = COLLECT(exe, a.binaries, a.datas, name="SaveSync", upx=False)
+coll = COLLECT(exe, a.binaries, a.datas, name="ResoSync", upx=False)

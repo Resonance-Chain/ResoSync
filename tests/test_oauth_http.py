@@ -7,9 +7,9 @@ import urllib.request
 
 import pytest
 
-from savesync import oauth
-from savesync.backends import GoogleDriveBackend, OneDriveBackend
-from savesync.vault import Vault
+from resosync import oauth
+from resosync.backends import GoogleDriveBackend, OneDriveBackend
+from resosync.vault import Vault
 
 
 class FakeResp:

@@ -115,7 +115,7 @@ class SnapshotStore:
             if dst.exists() and _hash_file(dst) == e["hash"]:
                 continue
             dst.parent.mkdir(parents=True, exist_ok=True)
-            tmp = dst.with_name(dst.name + ".savesync-tmp")
+            tmp = dst.with_name(dst.name + ".resosync-tmp")
             shutil.copyfile(self._obj(e["hash"]), tmp)
             replace_retry(tmp, dst)
             os.utime(dst, (now, now))

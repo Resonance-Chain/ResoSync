@@ -34,7 +34,7 @@ def _hint(parent, text, **grid):
 class App(tk.Tk):
     def __init__(self, minimized=False, instance=None):
         super().__init__()
-        self.title(f"SaveSync {__version__}")
+        self.title(f"ResoSync {__version__}")
         self.geometry("960x580")
         self.minsize(760, 440)
         self.cfg = Config.load()
@@ -166,11 +166,11 @@ class App(tk.Tk):
             return
         try:
             put = lambda kind: (lambda icon, item: self.events.put((kind, ())))
-            menu = pystray.Menu(pystray.MenuItem("Apri SaveSync", put("show"), default=True),
+            menu = pystray.Menu(pystray.MenuItem("Apri ResoSync", put("show"), default=True),
                                 pystray.MenuItem("Sincronizza tutto", put("sync_all")),
                                 pystray.Menu.SEPARATOR,
                                 pystray.MenuItem("Esci", put("quit")))
-            self.tray = pystray.Icon("SaveSync", system.icon_image(64), "SaveSync", menu)
+            self.tray = pystray.Icon("ResoSync", system.icon_image(64), "ResoSync", menu)
             self.tray.run_detached()
             if type(self.tray).__module__.endswith("_xorg"):
                 self.after(2500, self._check_tray)
@@ -233,7 +233,7 @@ class App(tk.Tk):
                     if transient:  # rete giù: riprovo tra un minuto
                         self.after(60000, self._start_service)
                     elif not isinstance(err, NeedsLogin):  # passphrase sbagliata, ecc.
-                        messagebox.showerror("SaveSync", f"Impossibile usare il cloud:\n{err}")
+                        messagebox.showerror("ResoSync", f"Impossibile usare il cloud:\n{err}")
                 elif kind == "install_dirs":
                     for gid, folder in args[0].items():
                         g = self.cfg.get_game(gid)
@@ -325,16 +325,16 @@ class App(tk.Tk):
                 self.update_button.configure(text=f"Aggiorna a {update.version}")
                 # prima della barra di stato: se il testo è lungo, il pulsante non deve sparire
                 self.update_button.pack(side="right", padx=8, pady=2, before=self.statusbar)
-                self._log(f"Disponibile SaveSync {update.version} ({update.page_url})")
+                self._log(f"Disponibile ResoSync {update.version} ({update.page_url})")
                 self._notify("Aggiornamento disponibile",
-                             f"SaveSync {update.version}: clicca 'Aggiorna' nella finestra.")
+                             f"ResoSync {update.version}: clicca 'Aggiorna' nella finestra.")
             elif manual:
-                messagebox.showinfo("SaveSync", f"Hai già l'ultima versione ({__version__}).")
+                messagebox.showinfo("ResoSync", f"Hai già l'ultima versione ({__version__}).")
 
         def failed(e):
             self._log(f"Controllo aggiornamenti non riuscito: {e}")
             if manual:
-                messagebox.showwarning("SaveSync", f"Controllo aggiornamenti non riuscito:\n{e}")
+                messagebox.showwarning("ResoSync", f"Controllo aggiornamenti non riuscito:\n{e}")
         run_bg(self, lambda: updater.check(s.update_repo, s.github_token), done, failed)
 
     def _apply_update(self):
@@ -345,8 +345,8 @@ class App(tk.Tk):
             import webbrowser
             webbrowser.open(u.page_url)
             return
-        if not messagebox.askyesno("Aggiornamento", f"Installare SaveSync {u.version}?\n\n"
-                                   "SaveSync si chiude, si aggiorna e si riapre da solo "
+        if not messagebox.askyesno("Aggiornamento", f"Installare ResoSync {u.version}?\n\n"
+                                   "ResoSync si chiude, si aggiorna e si riapre da solo "
                                    "(meno di un minuto). Ricordati di aggiornare anche gli "
                                    "altri PC."):
             return
@@ -356,13 +356,13 @@ class App(tk.Tk):
             updater.install(path)
             self._quit()
         run_bg(self, lambda: updater.download(u, self.cfg.settings.github_token), done,
-               lambda e: (messagebox.showerror("SaveSync", f"Download non riuscito:\n{e}"),
+               lambda e: (messagebox.showerror("ResoSync", f"Download non riuscito:\n{e}"),
                           self.update_button.configure(text=f"Aggiorna a {u.version}",
                                                        state="normal")))
 
     def _first_run(self):
         self._show()
-        messagebox.showinfo("Benvenuto in SaveSync",
+        messagebox.showinfo("Benvenuto in ResoSync",
                             "Per iniziare scegli dove salvare i dati nel cloud.\n\n"
                             "Il modo più semplice: una cartella dentro Google Drive, OneDrive o "
                             "Dropbox (il loro programma la manda online).\n\n"
@@ -374,7 +374,7 @@ class App(tk.Tk):
             self.withdraw()
             if not self._told_tray:
                 self._told_tray = True
-                self._notify("SaveSync è ancora attivo",
+                self._notify("ResoSync è ancora attivo",
                              "Continua a sincronizzare dalla barra di sistema. Per chiuderlo: "
                              "tasto destro sull'icona > Esci.")
         else:
@@ -401,7 +401,7 @@ class App(tk.Tk):
         sel = self.tree.selection()
         if not sel:
             if not quiet:
-                messagebox.showinfo("SaveSync", "Seleziona prima un gioco dalla lista.")
+                messagebox.showinfo("ResoSync", "Seleziona prima un gioco dalla lista.")
             return None
         return self.cfg.get_game(sel[0])
 
@@ -410,7 +410,7 @@ class App(tk.Tk):
             if not self.cfg.is_configured():
                 self.open_settings()
             else:
-                messagebox.showinfo("SaveSync", "Connessione al cloud non ancora pronta: "
+                messagebox.showinfo("ResoSync", "Connessione al cloud non ancora pronta: "
                                     "controlla le impostazioni o riprova tra poco.")
             return False
         return True
@@ -437,7 +437,7 @@ class App(tk.Tk):
     def _save_game(self, old, game, quiet=False):
         if old is None and self.cfg.get_game(game.id):
             if not quiet:
-                messagebox.showerror("SaveSync", f"C'è già un gioco con ID '{game.id}'.")
+                messagebox.showerror("ResoSync", f"C'è già un gioco con ID '{game.id}'.")
             return False
         if old:
             self.cfg.games[self.cfg.games.index(old)] = game
@@ -506,7 +506,7 @@ class App(tk.Tk):
         messagebox.showinfo("Opzioni di avvio Steam",
                             "Copiato negli appunti:\n\n" + opts + "\n\nIn Steam: tasto destro sul "
                             "gioco > Proprietà > Generale > Opzioni di avvio, e incolla.\n"
-                            "Da quel momento, ogni volta che avvii il gioco da Steam, SaveSync "
+                            "Da quel momento, ogni volta che avvii il gioco da Steam, ResoSync "
                             "scarica i salvataggi prima e li carica quando chiudi.")
 
     def show_details(self):
@@ -641,7 +641,7 @@ class GameDialog(tk.Toplevel):
 
     def _pick_process(self):
         if psutil is None:
-            messagebox.showinfo("SaveSync", "Installa psutil per questa funzione.", parent=self)
+            messagebox.showinfo("ResoSync", "Installa psutil per questa funzione.", parent=self)
             return
         names = sorted({(p.info.get("name") or "") for p in psutil.process_iter(["name"])} - {""},
                        key=str.lower)
@@ -665,7 +665,7 @@ class GameDialog(tk.Toplevel):
     def _save(self):
         name, path = self.name.get().strip(), self.path.get().strip()
         if not name or not path:
-            messagebox.showerror("SaveSync", "Servono nome e cartella.", parent=self)
+            messagebox.showerror("ResoSync", "Servono nome e cartella.", parent=self)
             return
         split = lambda s: [x.strip() for x in s.split(",") if x.strip()]
         try:
@@ -673,7 +673,7 @@ class GameDialog(tk.Toplevel):
             if max_mb < 0:
                 raise ValueError
         except ValueError:
-            messagebox.showerror("SaveSync", "Il limite di spazio dev'essere un numero (MB).",
+            messagebox.showerror("ResoSync", "Il limite di spazio dev'essere un numero (MB).",
                                  parent=self)
             return
         game = Game(id=self.game.id if self.game else slugify(name), name=name, path=path,
@@ -802,10 +802,10 @@ class DetectDialog(tk.Toplevel):
             answer = messagebox.askyesnocancel(
                 "Giochi con il cloud dello store",
                 f"{len(with_cloud)} giochi hanno già il cloud di Steam/Epic/GOG ({names}).\n\n"
-                "Sì = SOLO BACKUP: SaveSync tiene copie e versioni sul tuo cloud ma non scarica "
+                "Sì = SOLO BACKUP: ResoSync tiene copie e versioni sul tuo cloud ma non scarica "
                 "mai nella cartella del gioco, la sincronizzazione la fa lo store. Consigliato se "
                 "usi lo stesso store su tutti i PC.\n\n"
-                "No = SINCRONIZZA comunque con SaveSync (utile se il cloud dello store è spento "
+                "No = SINCRONIZZA comunque con ResoSync (utile se il cloud dello store è spento "
                 "o se giochi da store diversi).", parent=self)
             if answer is None:
                 return
@@ -1005,7 +1005,7 @@ class SettingsDialog(tk.Toplevel):
 
         box = section(4, "onedrive", "OneDrive (accesso diretto)",
                       "Serve l'Application (client) ID di un'app registrata su portal.azure.com "
-                      "(gratis, vedi README). I file stanno in App/SaveSync sul tuo OneDrive.")
+                      "(gratis, vedi README). I file stanno in App/ResoSync sul tuo OneDrive.")
         self._labeled(box, 0, "Client ID", "onedrive_client_id")
         self.od_status = self._login_row(box, 1, "onedrive")
 
@@ -1063,7 +1063,7 @@ class SettingsDialog(tk.Toplevel):
 
     def _tab_system(self, nb):
         f = ttk.Frame(nb, padding=12)
-        ttk.Checkbutton(f, text="Avvia SaveSync all'accensione del PC (ridotto a icona)",
+        ttk.Checkbutton(f, text="Avvia ResoSync all'accensione del PC (ridotto a icona)",
                         variable=self.v["autostart"]).grid(row=0, column=0, sticky="w")
         tray_ok = self.app.tray is not None
         cb = ttk.Checkbutton(f, text="Chiudendo la finestra resta attivo nella barra di sistema",
@@ -1085,7 +1085,7 @@ class SettingsDialog(tk.Toplevel):
                             "modalità gioco su Steam Deck", variable=self.bg_service).grid(
                 row=10, column=0, sticky="w", pady=(12, 0))
             _hint(f, "Parte all'accensione senza finestre (systemd). Mentre questa finestra è "
-                     "aperta resta in pausa. Log: savesync.log nella cartella dati.",
+                     "aperta resta in pausa. Log: resosync.log nella cartella dati.",
                   row=11, column=0)
         ttk.Separator(f).grid(row=5, column=0, sticky="we", pady=12)
         ttk.Label(f, text=f"Aggiornamenti (versione installata: {__version__})",
@@ -1099,7 +1099,7 @@ class SettingsDialog(tk.Toplevel):
             side="left", padx=4)
         ttk.Button(tok, text="Controlla ora", command=self._check_now).pack(side="left")
         _hint(f, "Serve solo se il repository è privato: token 'fine-grained' su GitHub con "
-                 "accesso in sola lettura a Contents del repository savesync.", row=9, column=0)
+                 "accesso in sola lettura a Contents del repository resosync.", row=9, column=0)
         return f
 
     def _check_now(self):
@@ -1180,8 +1180,8 @@ class SettingsDialog(tk.Toplevel):
         d = filedialog.askdirectory(parent=self)
         if d:
             p = Path(d)
-            self.v["folder_path"].set(os.path.normpath(p if p.name == "SaveSync"
-                                                       else p / "SaveSync"))
+            self.v["folder_path"].set(os.path.normpath(p if p.name == "ResoSync"
+                                                       else p / "ResoSync"))
 
     def _save(self):
         s = self.app.cfg.settings
@@ -1249,6 +1249,14 @@ def main(minimized=False):
     instance = system.SingleInstance(APP_DIR)
     if instance.already_running():
         return  # l'altra istanza si è mostrata
-    App(minimized=minimized, instance=instance).mainloop()
+    try:
+        migrated = system.migrate_from_savesync()
+    except Exception:
+        migrated = []
+    app = App(minimized=minimized, instance=instance)
+    if migrated:
+        app.after(800, lambda: app._log("Da SaveSync a ResoSync: aggiornati " +
+                                        ", ".join(migrated)))
+    app.mainloop()
     # Uscita netta: thread di watchdog/tray non devono tenere vivo il processo
     os._exit(0)

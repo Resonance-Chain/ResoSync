@@ -35,7 +35,7 @@ PROVIDERS = {
     },
 }
 
-_DONE_PAGE = """<!doctype html><meta charset="utf-8"><title>SaveSync</title>
+_DONE_PAGE = """<!doctype html><meta charset="utf-8"><title>ResoSync</title>
 <body style="font-family:sans-serif;text-align:center;padding-top:15vh">
 <h2>{title}</h2><p>{msg}</p></body>"""
 
@@ -115,7 +115,7 @@ class OAuthClient:
                 ok = "code" in q and q.get("state", [""])[0] == state
                 page = _DONE_PAGE.format(
                     title="Accesso completato" if ok else "Accesso non riuscito",
-                    msg="Puoi chiudere questa finestra e tornare a SaveSync." if ok
+                    msg="Puoi chiudere questa finestra e tornare a ResoSync." if ok
                     else urllib.parse.unquote(q.get("error_description", q.get("error", [""]))[0]))
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")

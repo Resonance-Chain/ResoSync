@@ -3,10 +3,10 @@ import sys
 import time
 from pathlib import Path
 
-from savesync import launcher, service
-from savesync.backends import FolderBackend
-from savesync.config import Config, Game
-from savesync.engine import SyncEngine
+from resosync import launcher, service
+from resosync.backends import FolderBackend
+from resosync.config import Config, Game
+from resosync.engine import SyncEngine
 
 
 def wait_until(cond, timeout=10):
@@ -164,7 +164,7 @@ def test_running_processes_skips_own_ancestors():
     comando e vive finché vive il launcher: il launcher non deve contarlo come gioco aperto."""
     import subprocess
     repo = str(Path(__file__).resolve().parents[1])
-    child = ("import sys; sys.path.insert(0, %r); from savesync import service; "
+    child = ("import sys; sys.path.insert(0, %r); from resosync import service; "
              "print(any(n == 'fintogiocopadre' for n, _ in service.running_processes()))" % repo)
     parent = ("import subprocess, sys; "
               "r = subprocess.run([sys.executable, '-c', %r], capture_output=True, text=True); "

@@ -2,9 +2,9 @@
 import os, sys, time, tempfile
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from savesync.config import Settings, Game
-from savesync.backends import FolderBackend
-from savesync.engine import SyncEngine
+from resosync.config import Settings, Game
+from resosync.backends import FolderBackend
+from resosync.engine import SyncEngine
 
 def make(tmp, name, cloud):
     s = Settings(backend="folder", folder_path=str(cloud), device_name=name, max_versions=3)

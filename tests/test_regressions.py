@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from savesync.backends import FolderBackend
-from savesync.config import Game, Settings
-from savesync.engine import SyncEngine
+from resosync.backends import FolderBackend
+from resosync.config import Game, Settings
+from resosync.engine import SyncEngine
 
 
 def pc(tmp_path, name, cloud="cloud", **settings):
@@ -61,7 +61,7 @@ def test_locked_file_is_not_treated_as_deleted(tmp_path, monkeypatch):
     write(ga, "s.sav", b"dati", 1000)
     write(ga, "altro.sav", b"x", 1000)
     a.sync_game(ga)
-    import savesync.engine as em
+    import resosync.engine as em
     real = em.sha256_file
     monkeypatch.setattr(em, "sha256_file", lambda p: (_ for _ in ()).throw(
         PermissionError("in uso")) if Path(p).name == "s.sav" else real(p))
@@ -159,10 +159,10 @@ def test_versions_are_pruned(tmp_path):
 
 def test_folder_backend_refuses_missing_cloud(tmp_path):
     with pytest.raises(FileNotFoundError):
-        FolderBackend(tmp_path / "Proton Drive non montato" / "SaveSync")
+        FolderBackend(tmp_path / "Proton Drive non montato" / "ResoSync")
     with pytest.raises(ValueError):
         FolderBackend("")
-    FolderBackend(tmp_path / "SaveSync")  # la sottocartella sì, la crea
+    FolderBackend(tmp_path / "ResoSync")  # la sottocartella sì, la crea
 
 
 def test_restore_cloud_version_roundtrip(tmp_path):
@@ -184,9 +184,9 @@ def test_restore_cloud_version_roundtrip(tmp_path):
 def test_switching_cloud_never_deletes_local_saves(tmp_path):
     """Dalla cartella Proton Drive a Google Drive/OneDrive (cloud nuovo e vuoto) con
     'propaga cancellazioni' attivo: i salvataggi locali NON devono sparire."""
-    from savesync.config import Config
+    from resosync.config import Config
     cfg = Config(app_dir=tmp_path / "app")
-    cfg.settings.folder_path = str(tmp_path / "proton" / "SaveSync")
+    cfg.settings.folder_path = str(tmp_path / "proton" / "ResoSync")
     cfg.settings.propagate_deletes = True
     (tmp_path / "proton").mkdir()
     saves = tmp_path / "saves"

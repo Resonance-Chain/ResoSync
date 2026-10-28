@@ -33,7 +33,7 @@ def run_bg(widget, fn, done, on_error=None):
             if on_error:
                 on_error(box["e"])
             else:
-                messagebox.showerror("SaveSync", str(box["e"]), parent=widget)
+                messagebox.showerror("ResoSync", str(box["e"]), parent=widget)
         else:
             done(box["r"])
     t = threading.Thread(target=work, daemon=True)
@@ -204,7 +204,7 @@ class StatusDialog(tk.Toplevel):
             return
         run_bg(self, lambda: self.app.engine.cleanup_versions(self.game, keep),
                lambda freed: (messagebox.showinfo(
-                   "SaveSync", f"Liberati {human_size(freed)} sul cloud.", parent=self),
+                   "ResoSync", f"Liberati {human_size(freed)} sul cloud.", parent=self),
                    self._load()))
 
 
@@ -249,7 +249,7 @@ class SnapshotDialog(tk.Toplevel):
     def _take(self):
         run_bg(self, lambda: self.app.engine.snapshot(self.game, "manuale"),
                lambda sid: (self._fill(), None if sid else messagebox.showinfo(
-                   "SaveSync", "Nessuna modifica dall'ultima istantanea.", parent=self)))
+                   "ResoSync", "Nessuna modifica dall'ultima istantanea.", parent=self)))
 
     def _restore(self):
         sel = self.tree.selection()
@@ -257,7 +257,7 @@ class SnapshotDialog(tk.Toplevel):
             return
         snap_id = sel[0]
         if self.app.service and self.app.service.is_playing(self.game.id):
-            messagebox.showwarning("SaveSync", "Chiudi prima il gioco.", parent=self)
+            messagebox.showwarning("ResoSync", "Chiudi prima il gioco.", parent=self)
             return
         if not messagebox.askyesno("Ripristina istantanea", "Rimettere i salvataggi com'erano "
                                    f"il {self.tree.set(snap_id, 'when')}?\n\nPrima ne faccio "
@@ -275,5 +275,5 @@ class SnapshotDialog(tk.Toplevel):
             if self.app.service:
                 self.app.service.request_sync(self.game.id)
             self._fill()
-            messagebox.showinfo("SaveSync", f"Fatto: {n} file rimessi.", parent=self)
+            messagebox.showinfo("ResoSync", f"Fatto: {n} file rimessi.", parent=self)
         run_bg(self, work, done)

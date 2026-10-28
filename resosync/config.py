@@ -9,7 +9,20 @@ from pathlib import Path
 from .backends import replace_retry
 from .vault import Vault
 
-APP_DIR = Path(os.environ.get("SAVESYNC_HOME", Path.home() / ".savesync"))
+def env(name: str, default=None):
+    """Variabili d'ambiente RESOSYNC_*, con i vecchi nomi SAVESYNC_* ancora validi."""
+    return os.environ.get(f"RESOSYNC_{name}") or os.environ.get(f"SAVESYNC_{name}") or default
+
+
+def _default_app_dir() -> Path:
+    if env("HOME"):
+        return Path(env("HOME"))
+    new, legacy = Path.home() / ".resosync", Path.home() / ".savesync"
+    # installazioni nate come SaveSync: i dati restano dove sono
+    return legacy if legacy.exists() and not new.exists() else new
+
+
+APP_DIR = _default_app_dir()
 
 DEFAULT_EXCLUDES = ["*.tmp", "*.temp", "~*", "*.lock", "desktop.ini", "Thumbs.db", ".DS_Store"]
 
@@ -56,7 +69,7 @@ class Settings:
     backend: str = "folder"            # folder | s3 | gdrive | onedrive
     folder_path: str = ""              # es. cartella di Google Drive / OneDrive / Dropbox
     s3_bucket: str = ""
-    s3_prefix: str = "savesync"
+    s3_prefix: str = "resosync"
     s3_endpoint: str = ""              # vuoto = AWS; altrimenti R2, Backblaze B2, MinIO...
     s3_region: str = ""
     s3_access_key: str = ""
@@ -77,7 +90,7 @@ class Settings:
     close_to_tray: bool = True
     snapshots_keep: int = 10           # istantanee della cartella tenute per gioco
     auto_update: bool = True
-    update_repo: str = "Resonance-Chain/savesync"
+    update_repo: str = "Resonance-Chain/ResoSync"
     github_token: str = ""             # solo se il repository è privato
 
 

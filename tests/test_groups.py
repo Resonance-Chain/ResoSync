@@ -2,9 +2,9 @@
 import os
 from pathlib import Path
 
-from savesync.backends import FolderBackend
-from savesync.config import Game, Settings
-from savesync.engine import SyncEngine
+from resosync.backends import FolderBackend
+from resosync.config import Game, Settings
+from resosync.engine import SyncEngine
 
 PARTS = ("sav.dat", "metadata.json", "screenshot.png")
 
@@ -75,7 +75,7 @@ def test_partial_arrival_applies_nothing(tmp_path):
     st = b.sync_game(gb)
     assert st["errors"] == 1 and st["down"] == 0
     assert contents(gb, "ManualSave-1") == {"v1"}  # intatto, non mescolato
-    assert not list(Path(gb.path).rglob("*.savesync-tmp"))
+    assert not list(Path(gb.path).rglob("*.resosync-tmp"))
     newest.write_bytes(hidden)  # arrivato
     st = b.sync_game(gb)
     assert st["down"] == 3 and contents(gb, "ManualSave-1") == {"v2"}

@@ -31,7 +31,7 @@ def parse_version(text: str) -> tuple:
 
 
 def _headers(token: str, accept="application/vnd.github+json") -> dict:
-    h = {"Accept": accept, "User-Agent": f"SaveSync/{__version__}"}
+    h = {"Accept": accept, "User-Agent": f"ResoSync/{__version__}"}
     if token:
         h["Authorization"] = f"Bearer {token}"
     return h
@@ -51,7 +51,7 @@ def check(repo: str, token: str = "", current: str = __version__):
     if parse_version(version) <= parse_version(current):
         return None
     setup = next((a for a in rel.get("assets", [])
-                  if a["name"].lower().startswith("savesync-setup") and
+                  if a["name"].lower().startswith(("resosync-setup", "savesync-setup")) and
                   a["name"].lower().endswith(".exe")), None)
     return Update(version=version, notes=rel.get("body") or "", page_url=rel.get("html_url", ""),
                   installer_url=setup["url"] if setup else "",
@@ -64,7 +64,7 @@ def can_self_install() -> bool:
 
 
 def download(update: Update, token: str = "", progress=lambda done, total: None) -> str:
-    target = os.path.join(tempfile.gettempdir(), update.installer_name or "SaveSync-Setup.exe")
+    target = os.path.join(tempfile.gettempdir(), update.installer_name or "ResoSync-Setup.exe")
     with requests.get(update.installer_url, headers=_headers(token, "application/octet-stream"),
                       stream=True, timeout=60) as r:
         r.raise_for_status()

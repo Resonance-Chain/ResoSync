@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from savesync import gamedb
+from resosync import gamedb
 
 RAW = {
     "Elden Ring": {"files": {"<winAppData>/EldenRing/<storeUserId>": {"tags": ["save"],

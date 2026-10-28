@@ -1,7 +1,7 @@
 """Modalità servizio, senza finestre: per lo Steam Deck in modalità gioco (o per un PC
 senza schermo). Si configura una volta dalla finestra, poi gira come servizio di sistema.
 
-Uso:  SaveSync --service
+Uso:  ResoSync --service
 """
 import logging
 import logging.handlers
@@ -18,10 +18,10 @@ RETRY = 60  # secondi tra un tentativo e l'altro se il cloud non è raggiungibil
 
 def setup_log(app_dir) -> logging.Logger:
     app_dir.mkdir(parents=True, exist_ok=True)
-    log = logging.getLogger("savesync")
+    log = logging.getLogger("resosync")
     log.setLevel(logging.INFO)
     if not log.handlers:
-        h = logging.handlers.RotatingFileHandler(app_dir / "savesync.log", maxBytes=1_000_000,
+        h = logging.handlers.RotatingFileHandler(app_dir / "resosync.log", maxBytes=1_000_000,
                                                  backupCount=3, encoding="utf-8")
         h.setFormatter(logging.Formatter("%(asctime)s  %(message)s", "%Y-%m-%d %H:%M:%S"))
         log.addHandler(h)
@@ -40,7 +40,7 @@ def run(stop_event=None) -> int:
             pass  # non nel thread principale (test)
 
     if not cfg.is_configured():
-        log.error("Cloud non configurato: apri SaveSync e completa le impostazioni")
+        log.error("Cloud non configurato: apri ResoSync e completa le impostazioni")
         return 2
 
     def on_event(kind, *args):

@@ -12,7 +12,7 @@ from .backends import Backend
 
 MAGIC = b"SSE1"
 META_KEY = "crypto.json"
-CHECK = b"savesync-ok"
+CHECK = b"resosync-ok"
 
 
 class CryptoError(Exception):

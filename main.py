@@ -3,7 +3,7 @@ import sys
 
 
 def main():
-    parser = argparse.ArgumentParser(prog="SaveSync",
+    parser = argparse.ArgumentParser(prog="ResoSync",
                                      description="Sincronizza i salvataggi dei giochi nel cloud")
     parser.add_argument("--minimized", action="store_true",
                         help="parte ridotto a icona (usato dall'avvio automatico)")
@@ -19,21 +19,21 @@ def main():
     args = parser.parse_args()
 
     if args.version:
-        from savesync import __version__
-        print(f"SaveSync {__version__}")
+        from resosync import __version__
+        print(f"ResoSync {__version__}")
         return
 
     if args.service:
-        from savesync.headless import run as run_service
+        from resosync.headless import run as run_service
         sys.exit(run_service())
 
     if args.launch:
-        from savesync.launcher import run
-        from savesync.system import in_game_mode
+        from resosync.launcher import run
+        from resosync.system import in_game_mode
         command = args.command[1:] if args.command[:1] == ["--"] else args.command
         sys.exit(run(args.launch, command, quiet=args.quiet or in_game_mode()))
 
-    from savesync.gui import main as gui_main
+    from resosync.gui import main as gui_main
     gui_main(minimized=args.minimized)
 
 

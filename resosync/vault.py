@@ -11,7 +11,8 @@ import os
 import sys
 from pathlib import Path
 
-SERVICE = "SaveSync"
+SERVICE = "ResoSync"
+LEGACY_SERVICE = "SaveSync"  # nome del progetto fino alla 0.4.0
 
 
 class Vault:
@@ -21,8 +22,9 @@ class Vault:
         self._keyring = None
         # Linux/Steam Deck: il portachiavi (KWallet/GNOME) non è attivo in modalità gioco né
         # per i servizi di sistema, quindi file protetto (leggibile solo dal tuo utente).
-        linux = sys.platform.startswith("linux") and not os.environ.get("SAVESYNC_USE_KEYRING")
-        if not os.environ.get("SAVESYNC_NO_KEYRING") and not linux:
+        from .config import env
+        linux = sys.platform.startswith("linux") and not env("USE_KEYRING")
+        if not env("NO_KEYRING") and not linux:
             try:
                 import keyring
                 from keyring.backends.fail import Keyring as FailKeyring
@@ -39,7 +41,13 @@ class Vault:
     def get(self, name: str) -> str:
         if self._keyring:
             try:
-                return self._keyring.get_password(SERVICE, name) or ""
+                value = self._keyring.get_password(SERVICE, name)
+                if value is None:
+                    # salvato quando il progetto si chiamava SaveSync: lo sposto sotto il nome nuovo
+                    value = self._keyring.get_password(LEGACY_SERVICE, name)
+                    if value:
+                        self._keyring.set_password(SERVICE, name, value)
+                return value or ""
             except Exception:
                 pass
         return self._read_fallback().get(name, "")

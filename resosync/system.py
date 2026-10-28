@@ -9,7 +9,7 @@ import threading
 from pathlib import Path
 
 SYSTEM = platform.system()
-APP_NAME = "SaveSync"
+APP_NAME = "ResoSync"
 
 
 def app_command() -> list:
@@ -52,7 +52,7 @@ def in_game_mode() -> bool:
 
 
 # ---------- servizio in background (Linux / Steam Deck) ----------
-SERVICE_NAME = "savesync.service"
+SERVICE_NAME = "resosync.service"
 
 
 def _unit_file() -> Path:
@@ -88,7 +88,7 @@ def set_background_service(enabled: bool) -> None:
         return
     unit.parent.mkdir(parents=True, exist_ok=True)
     unit.write_text(
-        "[Unit]\nDescription=SaveSync - sincronizzazione dei salvataggi\n"
+        "[Unit]\nDescription=ResoSync - sincronizzazione dei salvataggi\n"
         "After=network-online.target\nWants=network-online.target\n\n"
         "[Service]\n"
         f"ExecStart={quote_cmd(app_command() + ['--service'])}\n"
@@ -120,9 +120,9 @@ _RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 
 def _autostart_file() -> Path:
     if SYSTEM == "Darwin":
-        return Path.home() / "Library" / "LaunchAgents" / "com.savesync.app.plist"
+        return Path.home() / "Library" / "LaunchAgents" / "com.resosync.app.plist"
     return Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "autostart" / \
-        "savesync.desktop"
+        "resosync.desktop"
 
 
 def set_autostart(enabled: bool) -> None:
@@ -148,12 +148,47 @@ def set_autostart(enabled: bool) -> None:
         f.write_text('<?xml version="1.0" encoding="UTF-8"?>\n'
                      '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
                      '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
-                     '<plist version="1.0"><dict><key>Label</key><string>com.savesync.app'
+                     '<plist version="1.0"><dict><key>Label</key><string>com.resosync.app'
                      f'</string><key>ProgramArguments</key><array>{args}</array>'
                      '<key>RunAtLoad</key><true/></dict></plist>\n')
     else:
         f.write_text(f"[Desktop Entry]\nType=Application\nName={APP_NAME}\n"
                      f"Exec={quote_cmd(cmd)}\nX-GNOME-Autostart-enabled=true\n")
+
+
+LEGACY_NAME = "SaveSync"  # nome del progetto fino alla 0.4.0
+
+
+def migrate_from_savesync() -> list:
+    """Avvio automatico e servizio registrati quando il programma si chiamava SaveSync: li
+    tolgo e li registro col nome nuovo, sennò all'accensione partirebbero tutti e due."""
+    done = []
+    if SYSTEM == "Windows":
+        import winreg
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _RUN_KEY, 0,
+                                winreg.KEY_QUERY_VALUE | winreg.KEY_SET_VALUE) as k:
+                winreg.QueryValueEx(k, LEGACY_NAME)
+                winreg.DeleteValue(k, LEGACY_NAME)
+            set_autostart(True)
+            done.append("avvio automatico")
+        except OSError:
+            pass
+        return done
+    config = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+    legacy_autostart = config / "autostart" / "savesync.desktop"
+    if legacy_autostart.exists():
+        legacy_autostart.unlink()
+        set_autostart(True)
+        done.append("avvio automatico")
+    legacy_unit = config / "systemd" / "user" / "savesync.service"
+    if legacy_unit.exists() and service_supported():
+        _systemctl("disable", "--now", "savesync.service")
+        legacy_unit.unlink(missing_ok=True)
+        _systemctl("daemon-reload")
+        set_background_service(True)
+        done.append("servizio in background")
+    return done
 
 
 def is_autostart_enabled() -> bool:

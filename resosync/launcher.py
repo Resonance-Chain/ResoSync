@@ -1,7 +1,7 @@
 """Modalità launcher: sync -> gioco -> sync.
 
-Uso:   SaveSync.exe --launch elden-ring                 (usa il comando salvato nel gioco)
-       SaveSync.exe --launch elden-ring %command%       (opzioni di avvio di Steam)
+Uso:   ResoSync.exe --launch elden-ring                 (usa il comando salvato nel gioco)
+       ResoSync.exe --launch elden-ring %command%       (opzioni di avvio di Steam)
 """
 import os
 import shlex
@@ -21,7 +21,7 @@ from .service import is_game_running, running_processes
 class Splash:
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title("SaveSync")
+        self.root.title("ResoSync")
         self.root.resizable(False, False)
         self.root.attributes("-topmost", True)
         f = ttk.Frame(self.root, padding=16)
@@ -72,15 +72,15 @@ class Splash:
 
     def ask(self, message, default=True):
         self.root.deiconify()
-        return messagebox.askyesno("SaveSync", message, parent=self.root)
+        return messagebox.askyesno("ResoSync", message, parent=self.root)
 
     def info(self, message):
         self.root.deiconify()
-        messagebox.showinfo("SaveSync", message, parent=self.root)
+        messagebox.showinfo("ResoSync", message, parent=self.root)
 
     def warn(self, message):
         self.root.deiconify()
-        messagebox.showwarning("SaveSync", message, parent=self.root)
+        messagebox.showwarning("ResoSync", message, parent=self.root)
 
     def close(self):
         self.root.destroy()
@@ -187,12 +187,12 @@ def run(game_ref: str, command: list, quiet: bool = False) -> int:
     ui = QuietUI(log) if quiet else Splash()
     game = cfg.find_game(game_ref)
     if game and not cfg.is_configured():
-        ui.warn("Cloud non configurato: avvio il gioco senza sincronizzare. Apri SaveSync e "
+        ui.warn("Cloud non configurato: avvio il gioco senza sincronizzare. Apri ResoSync e "
                 "completa le impostazioni.")
         game = None
     if not game:
         if cfg.is_configured():
-            ui.warn(f"Gioco '{game_ref}' non trovato nella configurazione di SaveSync.")
+            ui.warn(f"Gioco '{game_ref}' non trovato nella configurazione di ResoSync.")
         ui.close()
         if command:  # non impedire di giocare per colpa nostra
             return subprocess.call(command)

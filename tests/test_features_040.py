@@ -7,11 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from savesync import gamedb, service, updater
-from savesync.backends import FolderBackend
-from savesync.config import Config, Game, Settings
-from savesync.engine import SyncEngine
-from savesync.snapshots import SnapshotStore
+from resosync import gamedb, service, updater
+from resosync.backends import FolderBackend
+from resosync.config import Config, Game, Settings
+from resosync.engine import SyncEngine
+from resosync.snapshots import SnapshotStore
 
 
 def pc(tmp_path, name, **settings):
@@ -244,8 +244,8 @@ def test_updater(monkeypatch):
     assert updater.parse_version("v0.10.0") > updater.parse_version("0.9.3")
     assert updater.parse_version("0.4") == (0, 4, 0)
     release = {"tag_name": "v0.5.0", "html_url": "https://x/rel", "body": "note",
-               "assets": [{"name": "SaveSync-portable.zip", "url": "u1"},
-                          {"name": "SaveSync-Setup-0.5.0.exe", "url": "u2"}]}
+               "assets": [{"name": "ResoSync-portable.zip", "url": "u1"},
+                          {"name": "ResoSync-Setup-0.5.0.exe", "url": "u2"}]}
     seen = {}
 
     def get(url, headers, timeout):
@@ -271,7 +271,7 @@ def test_folder_backend_sizes(tmp_path):
 
 
 def test_snapshots_same_millisecond_never_overwrite(tmp_path, monkeypatch):
-    import savesync.snapshots as snapmod
+    import resosync.snapshots as snapmod
     eng, g = pc(tmp_path, "A", snapshots_keep=10)
     monkeypatch.setattr(snapmod.time, "time", lambda: 1_800_000_000.123)  # orologio fermo
     for i in range(3):

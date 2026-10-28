@@ -414,7 +414,7 @@ class SyncEngine:
         R = remote.get(rel, {}).get("hash")
         B = base.get(rel)
         if game.mode == "backup":
-            # Il gioco ha già il suo cloud (Steam, Epic, GOG): SaveSync tiene solo le
+            # Il gioco ha già il suo cloud (Steam, Epic, GOG): ResoSync tiene solo le
             # copie con le versioni. Carico quello che cambia qui, non scarico mai.
             if L is not None and L != B and L != R:
                 try:
@@ -619,7 +619,7 @@ class SyncEngine:
         """Scarica in un file temporaneo accanto alla destinazione e verifica l'hash."""
         dst = Path(game.path, rel)
         dst.parent.mkdir(parents=True, exist_ok=True)
-        tmp = dst.with_name(dst.name + ".savesync-tmp")
+        tmp = dst.with_name(dst.name + ".resosync-tmp")
         try:
             src = key or (entry or {}).get("blob") or self._k_file(game.id, rel)
             try:

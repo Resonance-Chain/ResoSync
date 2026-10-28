@@ -16,10 +16,10 @@ from pathlib import Path
 
 import pytest
 
-from savesync import engine as engine_mod
-from savesync.backends import FolderBackend
-from savesync.config import Game, Settings
-from savesync.engine import CloudBusy, SyncEngine
+from resosync import engine as engine_mod
+from resosync.backends import FolderBackend
+from resosync.config import Game, Settings
+from resosync.engine import CloudBusy, SyncEngine
 
 
 class FakeCloudClient:

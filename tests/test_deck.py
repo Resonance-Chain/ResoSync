@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from savesync import config as config_mod
-from savesync import headless, launcher, system
-from savesync.config import Config, Game
+from resosync import config as config_mod
+from resosync import headless, launcher, system
+from resosync.config import Config, Game
 
 
 def use_app_dir(monkeypatch, app_dir):
@@ -68,7 +68,7 @@ def test_headless_service_syncs_and_reloads_config(app_home, tmp_path):
     finally:
         stop.set()
         t.join(10)
-    log = (cfg.app_dir / "savesync.log").read_text(encoding="utf-8")
+    log = (cfg.app_dir / "resosync.log").read_text(encoding="utf-8")
     assert "Servizio avviato" in log and "Configurazione ricaricata" in log
 
 
@@ -98,7 +98,7 @@ def test_quiet_launcher_unknown_game_still_plays(app_home, tmp_path):
 
 def test_quiet_launcher_cloud_down_still_plays(app_home, tmp_path):
     cfg, saves = app_home
-    cfg.settings.folder_path = str(tmp_path / "non-montato" / "SaveSync")
+    cfg.settings.folder_path = str(tmp_path / "non-montato" / "ResoSync")
     cfg.save()
     marker = tmp_path / "giocato"
     code = launcher.run("g", [sys.executable, "-c", f"open({str(marker)!r},'w')"], quiet=True)
@@ -112,12 +112,12 @@ def test_systemd_unit(monkeypatch, tmp_path):
     monkeypatch.setattr(system, "_systemctl", lambda *a: calls.append(a) or
                         subprocess.CompletedProcess(a, 0, "", ""))
     system.set_background_service(True)
-    unit = (tmp_path / "systemd/user/savesync.service").read_text()
+    unit = (tmp_path / "systemd/user/resosync.service").read_text()
     assert "--service" in unit and "WantedBy=default.target" in unit
-    assert ("enable", "--now", "savesync.service") in calls
+    assert ("enable", "--now", "resosync.service") in calls
     assert system.service_installed()
     system.set_background_service(False)
-    assert not system.service_installed() and ("disable", "--now", "savesync.service") in calls
+    assert not system.service_installed() and ("disable", "--now", "resosync.service") in calls
 
 
 def test_game_mode_detection(monkeypatch):
@@ -139,4 +139,4 @@ def test_game_mode_detection(monkeypatch):
 def test_main_version():
     out = subprocess.run([sys.executable, str(Path(__file__).resolve().parents[1] / "main.py"),
                           "--version"], capture_output=True, text=True, timeout=60).stdout
-    assert out.startswith("SaveSync ")
+    assert out.startswith("ResoSync ")

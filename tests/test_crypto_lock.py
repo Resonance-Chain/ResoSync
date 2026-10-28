@@ -4,10 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from savesync.backends import FolderBackend
-from savesync.config import Game, Settings
-from savesync.crypto import CryptoError, EncryptedBackend, cloud_is_encrypted
-from savesync.engine import CloudBusy, SyncEngine
+from resosync.backends import FolderBackend
+from resosync.config import Game, Settings
+from resosync.crypto import CryptoError, EncryptedBackend, cloud_is_encrypted
+from resosync.engine import CloudBusy, SyncEngine
 
 
 def test_roundtrip_and_ciphertext(tmp_path):

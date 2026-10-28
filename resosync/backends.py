@@ -293,7 +293,7 @@ class GoogleDriveBackend(_HttpBackend):
 
 
 class OneDriveBackend(_HttpBackend):
-    """OneDrive (personale o lavoro), nella cartella App/SaveSync creata da Microsoft:
+    """OneDrive (personale o lavoro), nella cartella App/ResoSync creata da Microsoft:
     l'app non può vedere il resto del tuo OneDrive."""
     ROOT = "https://graph.microsoft.com/v1.0/me/drive/special/approot"
     SIMPLE_LIMIT = 4 * 1024 * 1024

@@ -1,7 +1,14 @@
 # Novità
 
+(Fino alla 0.4.0 il progetto si chiamava SaveSync.)
+
 ## 0.5.0
 
+- **SaveSync ora si chiama ResoSync.** Aggiornando non si perde niente: i dati restano nella
+  cartella `.savesync` se esiste già, le password vengono spostate da sole sotto il nome nuovo,
+  l'avvio automatico e il servizio del Deck vengono convertiti al primo avvio, e le opzioni di
+  avvio di Steam che puntano a `SaveSync.exe` (o `savesync-app/SaveSync` sul Deck) continuano
+  a funzionare.
 - **Un salvataggio si sincronizza tutto insieme.** Per i giochi che salvano più file per ogni
   salvataggio (Cyberpunk: `ManualSave-12/` con `sav.dat`, `metadata.json`, `screenshot.png`;
   Skyrim: `Save1.ess` + `Save1.skse`) SaveSync decide e applica il salvataggio intero: in caso

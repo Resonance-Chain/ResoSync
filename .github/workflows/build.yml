@@ -46,34 +46,34 @@ jobs:
         shell: pwsh
         run: |
           # pubblicando una release, la versione scelta finisce dentro l'exe (serve
-          # all'aggiornamento automatico); altrimenti vale quella in savesync/__init__.py
+          # all'aggiornamento automatico); altrimenti vale quella in resosync/__init__.py
           $v = "${{ github.event.release.tag_name || inputs.release }}".TrimStart("v")
-          if ($v) { Set-Content savesync/__init__.py "__version__ = `"$v`"" }
-          $v = (Select-String -Path savesync/__init__.py -Pattern '"([^"]+)"').Matches[0].Groups[1].Value
-          "SAVESYNC_VERSION=$v" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          if ($v) { Set-Content resosync/__init__.py "__version__ = `"$v`"" }
+          $v = (Select-String -Path resosync/__init__.py -Pattern '"([^"]+)"').Matches[0].Groups[1].Value
+          "RESOSYNC_VERSION=$v" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           Write-Host "Versione: $v"
-      - run: pyinstaller --noconfirm savesync.spec
+      - run: pyinstaller --noconfirm resosync.spec
       - name: Smoke test dell'exe (deve partire e restare vivo)
         shell: pwsh
         run: |
-          $env:SAVESYNC_HOME = "$env:RUNNER_TEMP\savesync-home"
-          $p = Start-Process dist\SaveSync\SaveSync.exe -PassThru
+          $env:RESOSYNC_HOME = "$env:RUNNER_TEMP\resosync-home"
+          $p = Start-Process dist\ResoSync\ResoSync.exe -PassThru
           Start-Sleep -Seconds 15
-          if ($p.HasExited) { throw "SaveSync.exe si e' chiuso subito (codice $($p.ExitCode))" }
+          if ($p.HasExited) { throw "ResoSync.exe si e' chiuso subito (codice $($p.ExitCode))" }
           Stop-Process -Id $p.Id -Force
       - name: Installer
         shell: pwsh
         run: |
           if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" installer.iss
-      - run: Compress-Archive -Path dist\SaveSync -DestinationPath dist\SaveSync-portable.zip
+      - run: Compress-Archive -Path dist\ResoSync -DestinationPath dist\ResoSync-portable.zip
         shell: pwsh
       - uses: actions/upload-artifact@v4
         with:
-          name: SaveSync-windows
+          name: ResoSync-windows
           path: |
-            dist/SaveSync-Setup-*.exe
-            dist/SaveSync-portable.zip
+            dist/ResoSync-Setup-*.exe
+            dist/ResoSync-portable.zip
 
   linux:
     needs: test
@@ -88,25 +88,25 @@ jobs:
       - name: Versione
         run: |
           v="${{ github.event.release.tag_name || inputs.release }}"; v="${v#v}"
-          if [ -n "$v" ]; then echo "__version__ = \"$v\"" > savesync/__init__.py; fi
-          v=$(python -c "import savesync; print(savesync.__version__)")
-          echo "SAVESYNC_VERSION=$v" >> "$GITHUB_ENV"; echo "Versione: $v"
-      - run: pyinstaller --noconfirm savesync.spec
+          if [ -n "$v" ]; then echo "__version__ = \"$v\"" > resosync/__init__.py; fi
+          v=$(python -c "import resosync; print(resosync.__version__)")
+          echo "RESOSYNC_VERSION=$v" >> "$GITHUB_ENV"; echo "Versione: $v"
+      - run: pyinstaller --noconfirm resosync.spec
       - name: Smoke test (versione, servizio, finestra)
         run: |
-          export SAVESYNC_HOME="$RUNNER_TEMP/savesync-home"
-          dist/SaveSync/SaveSync --version
-          rc=0; timeout 30 dist/SaveSync/SaveSync --service || rc=$?
+          export RESOSYNC_HOME="$RUNNER_TEMP/resosync-home"
+          dist/ResoSync/ResoSync --version
+          rc=0; timeout 30 dist/ResoSync/ResoSync --service || rc=$?
           test "$rc" -eq 2  # non configurato: deve uscire con 2, non andare in crash
-          xvfb-run -a sh -c 'dist/SaveSync/SaveSync & pid=$!; sleep 15; kill -0 $pid && kill $pid'
+          xvfb-run -a sh -c 'dist/ResoSync/ResoSync & pid=$!; sleep 15; kill -0 $pid && kill $pid'
       - name: Pacchetto per Steam Deck / Linux
         run: |
-          cp install-steamdeck.sh assets/icon.png dist/SaveSync/
-          tar -C dist -czf dist/SaveSync-linux-x86_64.tar.gz SaveSync
+          cp install-steamdeck.sh assets/icon.png dist/ResoSync/
+          tar -C dist -czf dist/ResoSync-linux-x86_64.tar.gz ResoSync
       - uses: actions/upload-artifact@v4
         with:
-          name: SaveSync-linux
-          path: dist/SaveSync-linux-x86_64.tar.gz
+          name: ResoSync-linux
+          path: dist/ResoSync-linux-x86_64.tar.gz
 
   release:
     if: github.event_name == 'release' || inputs.release
@@ -119,22 +119,29 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+      - name: Copia dell'installer col vecchio nome (aggiornamento automatico da SaveSync 0.4.0)
+        run: |
+          for f in dist/ResoSync-Setup-*.exe; do cp "$f" "dist/SaveSync-Setup-${f#dist/ResoSync-Setup-}"; done
+          ls -la dist
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.release.tag_name || format('v{0}', inputs.release) }}
-          name: SaveSync ${{ github.event.release.tag_name || format('v{0}', inputs.release) }}
+          name: ResoSync ${{ github.event.release.tag_name || format('v{0}', inputs.release) }}
           target_commitish: ${{ github.sha }}
           body: |
-            **Windows:** `SaveSync-Setup-*.exe` (installer, consigliato) oppure `SaveSync-portable.zip`.
+            **Windows:** `ResoSync-Setup-*.exe` (installer, consigliato) oppure `ResoSync-portable.zip`.
+            (`SaveSync-Setup-*.exe` è lo stesso file: serve solo all'aggiornamento automatico di
+            chi ha ancora SaveSync, il vecchio nome del progetto.)
             Windows mostrerà "Windows ha protetto il PC" perché l'exe non è firmato:
             *Ulteriori informazioni > Esegui comunque*.
 
-            **Steam Deck / Linux:** `SaveSync-linux-x86_64.tar.gz`, istruzioni in
+            **Steam Deck / Linux:** `ResoSync-linux-x86_64.tar.gz`, istruzioni in
             [STEAMDECK.md](https://github.com/${{ github.repository }}/blob/main/STEAMDECK.md).
 
             Guida passo passo: [SETUP.md](https://github.com/${{ github.repository }}/blob/main/SETUP.md)
           generate_release_notes: true
           files: |
+            dist/ResoSync-Setup-*.exe
             dist/SaveSync-Setup-*.exe
-            dist/SaveSync-portable.zip
-            dist/SaveSync-linux-x86_64.tar.gz
+            dist/ResoSync-portable.zip
+            dist/ResoSync-linux-x86_64.tar.gz
