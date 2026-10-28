@@ -1,0 +1,9 @@
+watchdog>=4.0          # rileva subito i nuovi salvataggi
+psutil>=5.9            # riconosce quando un gioco è aperto o chiuso
+pystray>=0.19          # icona nella barra di sistema
+Pillow>=10.0           # disegna l'icona
+keyring>=24.0          # password nel portachiavi (Gestione credenziali di Windows)
+cryptography>=42.0     # cifratura lato client e token
+requests>=2.31         # Google Drive / OneDrive / download database giochi
+PyYAML>=6.0            # database giochi di Ludusavi
+boto3>=1.34            # storage S3 / R2 / B2

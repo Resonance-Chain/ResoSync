@@ -1,0 +1,62 @@
+name: Test e build
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt pytest
+      - run: python -m pytest -v tests
+
+  windows:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt pyinstaller
+      - run: pyinstaller --noconfirm savesync.spec
+      - name: Smoke test dell'exe (deve partire e restare vivo)
+        shell: pwsh
+        run: |
+          $env:SAVESYNC_HOME = "$env:RUNNER_TEMP\savesync-home"
+          $p = Start-Process dist\SaveSync\SaveSync.exe -PassThru
+          Start-Sleep -Seconds 15
+          if ($p.HasExited) { throw "SaveSync.exe si e' chiuso subito (codice $($p.ExitCode))" }
+          Stop-Process -Id $p.Id -Force
+      - name: Installer
+        shell: pwsh
+        run: |
+          $env:SAVESYNC_VERSION = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}".TrimStart("v") } else { "0.2.0" }
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" installer.iss
+      - run: Compress-Archive -Path dist\SaveSync -DestinationPath dist\SaveSync-portable.zip
+        shell: pwsh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SaveSync-windows
+          path: |
+            dist/SaveSync-Setup-*.exe
+            dist/SaveSync-portable.zip
+      - if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/SaveSync-Setup-*.exe
+            dist/SaveSync-portable.zip
