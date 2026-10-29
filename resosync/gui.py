@@ -1245,16 +1245,21 @@ class SettingsDialog(tk.Toplevel):
                                      parent=self)
                 return
         before = self.app.cfg.cloud_identity()
+        old = dict(vars(s))
         for k, val in new.items():
             setattr(s, k, val)
+        if not self.app.cfg.is_configured():
+            # finché la finestra resta aperta non cambia niente: né le impostazioni in uso
+            # né lo stato delle sync
+            for k, val in old.items():
+                setattr(s, k, val)
+            messagebox.showerror("Impostazioni", "Completa la configurazione del cloud scelto.",
+                                 parent=self)
+            return
         if self.app.cfg.cloud_identity() != before:
             # Cloud diverso: lo stato "com'era all'ultima sync" si riferiva al vecchio. Senza
             # azzerarlo, il cloud nuovo e vuoto sembrerebbe "hanno cancellato tutto".
             self.app.cfg.reset_all_states()
-        if not self.app.cfg.is_configured():
-            messagebox.showerror("Impostazioni", "Completa la configurazione del cloud scelto.",
-                                 parent=self)
-            return
         try:
             if new["autostart"] != system.is_autostart_enabled():
                 system.set_autostart(new["autostart"])
