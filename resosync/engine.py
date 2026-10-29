@@ -89,6 +89,7 @@ class SyncEngine:
         self._hash_cache = {}  # path -> (size, mtime_ns, hash)
         self._registered = set()
         self._unreadable = {}  # game_id -> file presenti ma bloccati in questo giro
+        self._scan = None  # durante una sync: i file locali come li ha visti la scansione
 
     # ---------- chiavi remote ----------
     @staticmethod
@@ -287,6 +288,13 @@ class SyncEngine:
         return {r: e["hash"] for r, e in local.items()} != remote
 
     def _sync_game(self, game, local, manifest) -> dict:
+        self._scan = local
+        try:
+            return self._sync_game_inner(game, local, manifest)
+        finally:
+            self._scan = None
+
+    def _sync_game_inner(self, game, local, manifest) -> dict:
         remote = {r: e for r, e in manifest["files"].items() if not e.get("deleted")}
         state = self._load_state(game.id)
         base, mtimes = state["base"], state["mtimes"]
@@ -730,9 +738,19 @@ class SyncEngine:
         # Fotografia del file: se il gioco lo riscrive mentre carichiamo non mandiamo roba a metà
         with tempfile.TemporaryDirectory() as td:
             snap = Path(td, "snap")
+            before = src.stat()
             shutil.copy2(src, snap)
-            st = snap.stat()
+            after, st = src.stat(), snap.stat()
+            if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns) \
+                    or st.st_size != after.st_size:
+                # il gioco lo stava scrivendo proprio adesso: la copia può essere a metà
+                raise IOError("il gioco sta scrivendo il file, riprovo più tardi")
             h = sha256_file(snap)
+            seen = (self._scan or {}).get(rel)
+            if seen and seen["hash"] != h:
+                # cambiato dopo la scansione: la decisione (carico? conflitto?) era presa su
+                # un altro contenuto, si rifà al prossimo giro
+                raise IOError("il file è cambiato durante la sincronizzazione, riprovo")
             if rel in remote and not remote[rel].get("blob"):
                 self._migrate_legacy(game, rel, remote[rel])
             existing = sorted(self.backend.list(prefix))
