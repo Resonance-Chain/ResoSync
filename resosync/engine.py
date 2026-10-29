@@ -822,7 +822,12 @@ class SyncEngine:
                 self.backend.download_file(src, tmp)
             except FileNotFoundError:
                 raise IOError("file non ancora arrivato sul cloud, riprovo più tardi")
-            if key is None and sha256_file(tmp) != entry["hash"]:
+            if key is None:
+                expected = entry["hash"]
+            else:  # versione scelta a mano: l'hash (corto) è nel nome, <data>__<pc>__<hash>
+                tail = key.rsplit("/", 1)[-1].split("__")[-1]
+                expected = tail if re.fullmatch(r"[0-9a-f]{16}", tail) else None
+            if expected and not sha256_file(tmp).startswith(expected):
                 raise IOError("hash non corrisponde (file sul cloud ancora in caricamento?)")
         except Exception:
             tmp.unlink(missing_ok=True)
@@ -1089,7 +1094,12 @@ class SyncEngine:
                 if dst.exists():
                     self._backup_local(game, rel)
                 dst.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(ref, dst)
+                tmp = dst.with_name(dst.name + ".resosync-tmp")
+                try:  # copia accanto e poi sostituisco: mai un salvataggio copiato a metà
+                    shutil.copy2(ref, tmp)
+                    replace_retry(tmp, dst)
+                finally:
+                    tmp.unlink(missing_ok=True)
             else:
                 self._download(game, rel, None, {}, key=ref)
             # aggiorna la data: è una modifica "nuova" e deve vincere su eventuali conflitti
