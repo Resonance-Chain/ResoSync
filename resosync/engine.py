@@ -71,6 +71,7 @@ def _by_date(names):
 # Una versione appena caricata da un altro dispositivo può non comparire ancora nel manifest
 # che vediamo (le cartelle cloud consegnano i file in ritardo): per un po' non si cancella.
 GRACE = 2 * 3600
+ANCESTRY = 20  # quante versioni precedenti ricorda ogni caricamento (hash corti)
 TEMP_SUFFIXES = (".resosync-tmp", ".resosync-old", ".savesync-tmp", ".partial")
 
 
@@ -90,6 +91,7 @@ class SyncEngine:
         self._registered = set()
         self._unreadable = {}  # game_id -> file presenti ma bloccati in questo giro
         self._scan = None  # durante una sync: i file locali come li ha visti la scansione
+        self._base = {}  # durante una sync: la base (com'era ogni file all'ultima sync)
 
     # ---------- chiavi remote ----------
     @staticmethod
@@ -292,12 +294,34 @@ class SyncEngine:
         try:
             return self._sync_game_inner(game, local, manifest)
         finally:
-            self._scan = None
+            self._scan, self._base = None, {}
+
+    def _descends(self, rel, entry) -> bool:
+        """La versione sul cloud è stata fatta partendo dalla mia (o dopo averla vista)? Allora
+        è sicuramente più nuova, qualunque cosa dica l'orologio di chi l'ha caricata."""
+        mine = self._base.get(rel)
+        return bool(mine) and mine[:16] in entry.get("anc", ())
+
+    def _is_rollback(self, rel, entry, mtimes) -> bool:
+        """La versione sul cloud è PIÙ VECCHIA di quella che ho già sincronizzato (manifest
+        vecchio arrivato in ritardo)? Si guarda la data, ma se quella versione discende dalla
+        mia non è un ritorno indietro: uno Steam Deck con l'orologio indietro non deve vedersi
+        scartare i salvataggi."""
+        if self._descends(rel, entry):
+            return False
+        return entry.get("mtime", 0) < mtimes.get(rel, 0) - 0.001
+
+    def _group_rollback(self, rels, R, B, remote, mtimes) -> bool:
+        if any(self._descends(r, remote[r]) for r in R if R[r] != B.get(r)):
+            return False
+        known = max((mtimes.get(r, 0) for r in rels), default=0)
+        return max((remote[r].get("mtime", 0) for r in R), default=0) < known - 0.001
 
     def _sync_game_inner(self, game, local, manifest) -> dict:
         remote = {r: e for r, e in manifest["files"].items() if not e.get("deleted")}
         state = self._load_state(game.id)
         base, mtimes = state["base"], state["mtimes"]
+        self._base = base
         changes = {}
         skip = self._unreadable.get(game.id, set())
         stats = {"up": 0, "down": 0, "conflicts": 0, "deleted": 0, "errors": len(skip)}
@@ -516,7 +540,7 @@ class SyncEngine:
                     self._download(game, rel, remote[rel], base, mtimes); stats["down"] += 1
             elif remote_changed and not local_changed:
                 if R is not None and L is not None and \
-                        remote[rel].get("mtime", 0) < mtimes.get(rel, 0) - 0.001:
+                        self._is_rollback(rel, remote[rel], mtimes):
                     # Il cloud propone un salvataggio PIÙ VECCHIO di quello già
                     # sincronizzato: tipico delle cartelle cloud (Proton Drive, OneDrive,
                     # Dropbox) quando un manifest vecchio arriva in ritardo e
@@ -543,7 +567,7 @@ class SyncEngine:
                     stats["up"] += 1
             else:
                 stats["conflicts"] += 1
-                stale = R is not None and remote[rel].get("mtime", 0) < mtimes.get(rel, 0) - 0.001
+                stale = R is not None and self._is_rollback(rel, remote[rel], mtimes)
                 if L is None and stale and propagate:
                     # cancellato qui, e sul cloud c'è solo una versione PIÙ VECCHIA di quella
                     # che avevo (manifest in ritardo): vince la cancellazione
@@ -610,8 +634,7 @@ class SyncEngine:
         l_time = max((local[r]["mtime"] for r in L), default=0)
         r_time = max((remote[r].get("mtime", 0) for r in R), default=0)
         if L == B:  # è cambiato solo il cloud
-            known = max((mtimes.get(r, 0) for r in rels), default=0)
-            if L and R and r_time < known - 0.001:
+            if L and R and self._group_rollback(rels, R, B, remote, mtimes):
                 self.log(f"[{game.name}] sul cloud c'è una versione più vecchia del "
                          f"salvataggio {name}: ricarico quella più recente")
                 self._push_group(rels, **ctx)
@@ -657,14 +680,12 @@ class SyncEngine:
         """Lo slot è stato cancellato qui (tutti i suoi file). Sempre tutto insieme."""
         ctx = dict(game=game, local=local, remote=remote, base=base, mtimes=mtimes,
                    changes=changes, stats=stats)
-        known = max((mtimes.get(r, 0) for r in rels), default=0)
-        r_time = max((remote[r].get("mtime", 0) for r in R), default=0)
         if R == B:  # il cloud è fermo: è solo la mia cancellazione
             if propagate:
                 self._push_group(rels, **ctx)
             else:
                 self._apply_group(rels, propagate=False, **ctx)  # lo rimetto, intero
-        elif R and r_time >= known - 0.001:
+        elif R and not self._group_rollback(rels, R, B, remote, mtimes):
             # sul cloud c'è una versione più nuova di quella che avevo: vince, intera
             stats["conflicts"] += 1
             self._apply_group(rels, propagate=True, **ctx)
@@ -818,8 +839,16 @@ class SyncEngine:
                 blob = f"{prefix}{_stamp()}__{self._device_tag()}__{h[:16]}"
                 self.backend.upload_file(blob, snap)
                 existing.append(blob)
+        # da quali versioni discende questa: quella che avevo, quella che sostituisco sul
+        # cloud e i loro antenati (vedi _descends)
+        prev = remote.get(rel, {})
+        anc = []
+        for a in [base.get(rel, "")[:16], prev.get("hash", "")[:16], *prev.get("anc", ())]:
+            if a and a != h[:16] and a not in anc:
+                anc.append(a)
         changes[rel] = {"hash": h, "mtime": st.st_mtime, "size": st.st_size, "blob": blob,
-                        "device": self.settings.device_name, "time": time.time()}
+                        "device": self.settings.device_name, "time": time.time(),
+                        "anc": anc[:ANCESTRY]}
         self._prune(existing, keep=blob)
         base[rel] = h
         mtimes[rel] = st.st_mtime

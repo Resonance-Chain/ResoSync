@@ -255,3 +255,83 @@ def test_partial_mass_deletion_not_propagated(tmp_path):
     assert st["deleted"] == 0
     b.sync_game(gb)
     assert all(Path(gb.path, f"{i}.sav").exists() for i in range(6))
+
+
+# 8. orologio sbagliato su un dispositivo (Steam Deck rimasto offline, batteria tampone
+#    scarica): un salvataggio nuovo ma con la data "nel passato" non è un ritorno indietro
+#    del cloud, e non deve essere scartato
+@pytest.mark.parametrize("group", ["none", "folder"])
+def test_device_with_clock_behind_does_not_lose_progress(tmp_path, group):
+    a, ga = pc(tmp_path, "PC")
+    b, gb = pc(tmp_path, "Deck")
+    ga.group_by = gb.group_by = group
+    write(ga, "Slot/s.sav", b"PC: capitolo 1", 10_000)
+    write(ga, "Slot/meta.json", b"m1", 10_000)
+    a.sync_game(ga)
+    b.sync_game(gb)
+    # sul Deck si gioca DOPO, ma il suo orologio è un'ora indietro
+    write(gb, "Slot/s.sav", b"Deck: capitolo 2", 10_000 + 600 - 3600)
+    write(gb, "Slot/meta.json", b"m2", 10_000 + 600 - 3600)
+    b.sync_game(gb)
+    a.sync_game(ga)
+    assert read(ga, "Slot/s.sav") == b"Deck: capitolo 2"
+    assert read(ga, "Slot/meta.json") == b"m2"
+    b.sync_game(gb)
+    assert read(gb, "Slot/s.sav") == b"Deck: capitolo 2"
+
+
+def test_stale_manifest_still_detected_with_ancestry(tmp_path):
+    """Il controllo nuovo non deve indebolire quello vecchio: un manifest arrivato in
+    ritardo con una versione intermedia mai vista resta un ritorno indietro."""
+    a, ga = pc(tmp_path, "A")
+    b, gb = pc(tmp_path, "B")
+    write(ga, "s.sav", b"v1", 1000)
+    a.sync_game(ga)
+    b.sync_game(gb)
+    write(ga, "s.sav", b"v2", 2000)
+    a.sync_game(ga)
+    stale = (tmp_path / "cloud/g/manifest.json").read_bytes()  # con v2, che B non ha visto
+    write(ga, "s.sav", b"v3", 3000)
+    a.sync_game(ga)
+    b.sync_game(gb)
+    assert read(gb, "s.sav") == b"v3"
+    (tmp_path / "cloud/g/manifest.json").write_bytes(stale)
+    b.sync_game(gb)
+    assert read(gb, "s.sav") == b"v3"
+    a.sync_game(ga)
+    assert read(ga, "s.sav") == b"v3" and cloud_content(tmp_path, "s.sav") == b"v3"
+
+
+# 9. launcher: il manifest è arrivato dal client cloud ma il salvataggio vero no (è più
+#    grande, arriva dopo). Il gioco non deve partire col salvataggio vecchio senza dirlo
+def test_launcher_waits_for_save_still_arriving(tmp_path, monkeypatch):
+    import sys
+    import threading
+    import time
+    from test_deck import use_app_dir
+    from resosync import launcher
+    from resosync.config import Config
+    use_app_dir(monkeypatch, tmp_path / "app")
+    cfg = Config(app_dir=tmp_path / "app")
+    cfg.settings.folder_path = str(tmp_path / "cloud")
+    cfg.settings.device_name = "Deck"
+    saves = tmp_path / "saves"
+    saves.mkdir()
+    cfg.games.append(Game("g", "Gioco", str(saves)))
+    cfg.save()
+    (saves / "slot.sav").write_bytes(b"vecchia")
+    SyncEngine(cfg.settings, FolderBackend(tmp_path / "cloud"), cfg.app_dir,
+               log=lambda m: None).sync_game(cfg.games[0])
+    other, og = pc(tmp_path, "PC")
+    write(og, "slot.sav", b"nuova dal PC", time.time() + 5)
+    other.sync_game(og)
+    blob = tmp_path / "cloud" / manifest(tmp_path)["slot.sav"]["blob"]
+    parked = tmp_path / "in-arrivo"
+    blob.rename(parked)
+    threading.Timer(4, lambda: parked.rename(blob)).start()  # il client cloud lo consegna
+    seen = tmp_path / "visto-dal-gioco"
+    game_cmd = [sys.executable, "-c", f"open({str(seen)!r},'wb').write("
+                                      f"open({str(saves / 'slot.sav')!r},'rb').read())"]
+    assert launcher.run("g", game_cmd, quiet=True) == 0
+    assert seen.read_bytes() == b"nuova dal PC"
+
