@@ -81,8 +81,11 @@ class Game:
 
 @dataclass
 class Settings:
-    backend: str = "folder"            # folder | s3 | gdrive | onedrive
+    backend: str = "folder"            # folder | s3 | gdrive | onedrive | rclone
     folder_path: str = ""              # es. cartella di Google Drive / OneDrive / Dropbox
+    rclone_remote: str = ""            # es. "proton:ResoSync" (configurato con rclone config)
+    rclone_path: str = ""              # vuoto = cerca rclone da solo
+    rclone_config: str = ""            # vuoto = il rclone.conf di sempre
     s3_bucket: str = ""
     s3_prefix: str = "resosync"
     s3_endpoint: str = ""              # vuoto = AWS; altrimenti R2, Backblaze B2, MinIO...
@@ -200,7 +203,8 @@ class Config:
         s = self.settings
         where = {"folder": os.path.normcase(os.path.normpath(s.folder_path or ".")),
                  "s3": (s.s3_endpoint, s.s3_bucket, s.s3_prefix),
-                 "gdrive": s.gdrive_client_id, "onedrive": s.onedrive_client_id}.get(s.backend)
+                 "gdrive": s.gdrive_client_id, "onedrive": s.onedrive_client_id,
+                 "rclone": s.rclone_remote.strip().rstrip("/")}.get(s.backend)
         return (s.backend, str(where))
 
     def reset_all_states(self) -> None:
@@ -210,4 +214,5 @@ class Config:
     def is_configured(self) -> bool:
         s = self.settings
         return bool({"folder": s.folder_path, "s3": s.s3_bucket,
-                     "gdrive": s.gdrive_client_id, "onedrive": s.onedrive_client_id}.get(s.backend))
+                     "gdrive": s.gdrive_client_id, "onedrive": s.onedrive_client_id,
+                     "rclone": ":" in s.rclone_remote}.get(s.backend))

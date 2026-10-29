@@ -153,7 +153,8 @@ class App(tk.Tk):
             self.tree.selection_set(sel[0])
         s = self.cfg.settings
         where = {"folder": s.folder_path, "s3": f"s3://{s.s3_bucket}/{s.s3_prefix}",
-                 "gdrive": "Google Drive", "onedrive": "OneDrive"}.get(s.backend, "?")
+                 "gdrive": "Google Drive", "onedrive": "OneDrive",
+                 "rclone": f"rclone {s.rclone_remote}"}.get(s.backend, "?")
         bits = [f"Cloud: {where or '-'}" + (" (cifrato)" if s.encrypt else ""),
                 f"PC: {s.device_name}",
                 "sync automatica" if s.auto_sync else "sync manuale",
@@ -1013,7 +1014,36 @@ class SettingsDialog(tk.Toplevel):
                                           ("s3_access_key", "Access key"),
                                           ("s3_secret_key", "Secret key")]):
             self._labeled(box, i, label, key, secret=key == "s3_secret_key")
+
+        box = section(8, "rclone", "rclone (Proton Drive, Dropbox, pCloud, Mega, SFTP… oltre 70)",
+                      "Configura il remote una volta con 'rclone config' (rclone.org). Qui scrivi "
+                      "nome:cartella, es. proton:ResoSync. Funziona anche sullo Steam Deck.")
+        ttk.Label(box, text="Remote").grid(row=0, column=0, sticky="w")
+        self.rc_combo = ttk.Combobox(box, textvariable=self.v["rclone_remote"], width=41)
+        self.rc_combo.grid(row=0, column=1, sticky="w", pady=1)
+        ttk.Button(box, text="Cerca", command=self._rclone_remotes).grid(row=0, column=2, padx=4)
+        self._labeled(box, 1, "Programma rclone", "rclone_path")
+        self._labeled(box, 2, "File di config", "rclone_config")
+        _hint(box, "Gli ultimi due si possono lasciare vuoti: rclone si cerca da solo.",
+              row=3, column=0, columnspan=3)
         return f
+
+    def _rclone_remotes(self):
+        from .backends import rclone_remotes
+        try:
+            found = rclone_remotes(self.v["rclone_path"].get().strip(),
+                                   self.v["rclone_config"].get().strip())
+        except Exception as e:
+            messagebox.showerror("rclone", str(e), parent=self)
+            return
+        if not found:
+            messagebox.showinfo("rclone", "Nessun remote configurato: apri un terminale e usa "
+                                "'rclone config' per collegare il tuo cloud.", parent=self)
+            return
+        self.rc_combo.configure(values=[r + "ResoSync" for r in found])
+        if ":" not in self.v["rclone_remote"].get():
+            self.v["rclone_remote"].set(found[0] + "ResoSync")
+        self.rc_combo.event_generate("<Down>")
 
     def _tab_security(self, nb):
         f = ttk.Frame(nb, padding=12)
