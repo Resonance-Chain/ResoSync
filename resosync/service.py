@@ -290,37 +290,47 @@ class SyncService:
             pass  # cloud irraggiungibile: riprovo al prossimo giro
 
     def _loop(self):
-        last_full = time.time()
-        last_poll = last_proc = 0
+        self._last = {"full": time.time(), "poll": 0, "proc": 0}
         while not self._stop.is_set():
-            now = time.time()
-            s = self.config.settings
-            if s.auto_sync and now - last_full >= s.poll_interval:
-                last_full = now
-                with self._lock:
-                    for g in self.config.games:
-                        if g.enabled and not (self.is_playing(g.id) and s.sync_only_after_exit):
-                            self._pending.setdefault(g.id, 0)
-            if s.auto_sync and not HAVE_WATCHDOG and now - last_poll >= 3:
-                last_poll = now
-                self._poll_local_changes()
-            if now - last_proc >= 3:
-                last_proc = now
-                self._check_processes()
-
-            with self._lock:
-                due = [gid for gid, t in self._pending.items()
-                       if t <= now and (s.auto_sync or gid in self._forced)
-                       and not (self.is_playing(gid) and s.sync_only_after_exit
-                                and gid not in self._allow_playing)]
-                # le altre restano in attesa: partono quando il gioco si chiude
-                for gid in due:
-                    del self._pending[gid]
-                    self._forced.discard(gid)
-                    self._allow_playing.discard(gid)
-            for gid in due:
-                self._run(gid)
+            try:
+                self._tick()
+            except Exception as e:  # noqa: BLE001
+                # mai far morire il thread: smetterebbe di sincronizzare senza dire niente
+                try:
+                    self.on_event("log", f"Errore imprevisto nel servizio (continuo): {e!r}")
+                except Exception:
+                    pass
             self._stop.wait(0.5)
+
+    def _tick(self):
+        now = time.time()
+        s = self.config.settings
+        last = self._last
+        if s.auto_sync and now - last["full"] >= s.poll_interval:
+            last["full"] = now
+            with self._lock:
+                for g in self.config.games:
+                    if g.enabled and not (self.is_playing(g.id) and s.sync_only_after_exit):
+                        self._pending.setdefault(g.id, 0)
+        if s.auto_sync and not HAVE_WATCHDOG and now - last["poll"] >= 3:
+            last["poll"] = now
+            self._poll_local_changes()
+        if now - last["proc"] >= 3:
+            last["proc"] = now
+            self._check_processes()
+
+        with self._lock:
+            due = [gid for gid, t in self._pending.items()
+                   if t <= now and (s.auto_sync or gid in self._forced)
+                   and not (self.is_playing(gid) and s.sync_only_after_exit
+                            and gid not in self._allow_playing)]
+            # le altre restano in attesa: partono quando il gioco si chiude
+            for gid in due:
+                del self._pending[gid]
+                self._forced.discard(gid)
+                self._allow_playing.discard(gid)
+        for gid in due:
+            self._run(gid)
 
     def _run(self, gid):
         game = self.config.get_game(gid)
