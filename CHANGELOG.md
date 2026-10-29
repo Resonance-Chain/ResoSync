@@ -2,6 +2,35 @@
 
 (Fino alla 0.4.0 il progetto si chiamava SaveSync.)
 
+## 0.5.3
+
+Caccia ai bug con un solo obiettivo: **nessun modo di perdere un salvataggio o di rovinarlo**.
+
+- **Il gioco salva mentre ResoSync lavora**: se il file cambiava durante il caricamento,
+  sul cloud poteva finire un salvataggio a metà (che poi l'altro PC scaricava). E se il gioco
+  salvava mentre arrivava la versione dell'altro PC, il salvataggio appena fatto veniva
+  sovrascritto. Ora ResoSync se ne accorge, non tocca niente e riprova al giro dopo.
+- **Salvataggi da più file** (Cyberpunk e simili): se la sostituzione di un file si bloccava a
+  metà (antivirus, client cloud), restava il sav.dat nuovo con il metadata vecchio. Ora si
+  torna indietro e lo slot resta com'era, intero.
+- **Orologio sbagliato** (Steam Deck rimasto offline, ora sballata): un salvataggio nuovo con
+  la data "nel passato" veniva scambiato per un ritorno indietro del cloud e scartato. Ora ogni
+  caricamento ricorda da quali versioni discende, e se discende dalla tua è più nuovo,
+  qualunque cosa dica l'orologio.
+- **Avvio dal launcher / Steam**: con le cartelle cloud il manifest arriva spesso prima del
+  salvataggio vero, e il gioco partiva con il salvataggio vecchio senza dire niente. Ora
+  ResoSync aspetta fino a 30 secondi che arrivi, e se non arriva te lo chiede.
+- **Cancellazioni di massa**: la protezione scattava solo se la cartella si svuotava del tutto.
+  Ora anche se sparisce più di metà dei salvataggi in un colpo (gioco reinstallato che lascia
+  solo il config) le cancellazioni non si propagano agli altri PC.
+- **Ripristino di una versione**: una versione rovinata sul cloud finiva nella cartella del
+  gioco, e un errore a metà copia di un backup locale lasciava il salvataggio troncato. Ora la
+  versione si verifica prima e la copia è sicura.
+- **Ripristino di un'istantanea**: ora controlla tutto prima di toccare qualcosa. Un contenuto
+  rovinato non si rimette, e un file attuale si sovrascrive solo se ne esiste una copia.
+- **Modifiche "invisibili"**: un programma che riscriveva il salvataggio con la stessa
+  dimensione e la stessa data non veniva notato. Ora su Linux / Steam Deck sì.
+
 ## 0.5.2
 
 Seconda caccia ai bug, soprattutto sulle **cancellazioni** (finora mai simulate):
