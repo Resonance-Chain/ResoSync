@@ -137,10 +137,25 @@ class SnapshotStore:
         data = self.load(snap_id)
         n = 0
         now = time.time()
+        # Prima controllo tutto, poi tocco: un contenuto rovinato sul disco non finisce nel
+        # gioco, e un file attuale si sovrascrive solo se ne esiste una copia (di solito
+        # nell'istantanea fatta subito prima del ripristino)
+        todo = []
         for rel, e in data["files"].items():
             dst = Path(game_path, rel)
-            if dst.exists() and _hash_file(dst) == e["hash"]:
+            cur = _hash_file(dst) if dst.exists() else None
+            if cur == e["hash"]:
                 continue
+            obj = self._obj(e["hash"])
+            if not obj.exists() or _hash_file(obj) != e["hash"]:
+                raise IOError(f"la copia di {rel} in questa istantanea è rovinata o mancante: "
+                              f"non ripristino niente")
+            if cur is not None and not self._obj(cur).exists():
+                raise IOError(f"non ho una copia di sicurezza della versione attuale di {rel} "
+                              f"(forse era bloccato dal gioco): non ripristino niente")
+            todo.append((rel, e))
+        for rel, e in todo:
+            dst = Path(game_path, rel)
             dst.parent.mkdir(parents=True, exist_ok=True)
             tmp = dst.with_name(dst.name + ".resosync-tmp")
             shutil.copyfile(self._obj(e["hash"]), tmp)
