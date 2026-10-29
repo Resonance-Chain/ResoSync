@@ -17,6 +17,8 @@ from .config import Config, process_names
 from .engine import SyncEngine
 from .service import is_game_running, running_processes
 
+PRE_LAUNCH_WAIT = 30  # secondi: quanto aspettare un salvataggio ancora in arrivo dal cloud
+
 
 class Splash:
     def __init__(self):
@@ -212,11 +214,25 @@ def run(game_ref: str, command: list, quiet: bool = False) -> int:
         return holder["engine"].sync_game(game, wait_lock=wait)
 
     ui.say(f"Scarico i salvataggi di {game.name}…")
-    _, err = ui.run(lambda: sync(60))
+    stats, err = ui.run(lambda: sync(60))
+    # Con le cartelle cloud il manifest (piccolo) arriva spesso prima del salvataggio vero:
+    # aspetto un po' che arrivi, invece di far partire il gioco con quello vecchio
+    deadline = time.time() + PRE_LAUNCH_WAIT
+    while not err and stats["errors"] and time.time() < deadline:
+        ui.say(f"Aspetto che arrivino dal cloud gli ultimi salvataggi di {game.name}…")
+        ui.sleep(3)
+        stats, err = ui.run(lambda: sync(60))
     if err:
         log(f"[{game.name}] sync prima del gioco fallita: {err}")
         if not ui.ask(f"Non riesco a scaricare i salvataggi:\n{err}\n\nAvviare comunque il "
                       "gioco?"):
+            ui.close()
+            return 1
+    elif stats["errors"]:
+        log(f"[{game.name}] prima del gioco: {stats['errors']} file non ancora scaricati")
+        if not ui.ask(f"Alcuni salvataggi di {game.name} non sono ancora arrivati dal cloud "
+                      "(o sono bloccati da un altro programma).\n\nSe avvii adesso potresti "
+                      "ripartire da un salvataggio vecchio. Avviare comunque?", default=True):
             ui.close()
             return 1
 
