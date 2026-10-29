@@ -68,6 +68,11 @@ class FakeCloudClient:
                 p.write_bytes(srv_data)
             self.seen[name][rel] = (srv_data, srv_seq)
 
+    def sync_now(self, rng, name):
+        """Accesso diretto (rclone, API): la replica è allineata al server in quel momento."""
+        for rel in sorted(self._paths(name) | set(self.server) | set(self.seen[name])):
+            self.step(rng, name, rel)
+
     def flush(self, rng):
         for _ in range(3):
             for name in self.replicas:
@@ -79,9 +84,12 @@ SAVE_PARTS = ("sav.dat", "meta.json", "shot.png")  # un salvataggio "alla Cyberp
 
 
 def run_simulation(tmp_path, seed, steps=300, files=("slot1.sav", "slot2.sav"),
-                   propagate=False, multi=False, group_by="folder", deletes=False):
+                   propagate=False, multi=False, group_by="folder", deletes=False,
+                   direct=()):
     """multi=True: ogni elemento di `files` è una cartella-salvataggio con 3 file scritti
-    insieme dal gioco (stesso contenuto = stessa partita)."""
+    insieme dal gioco (stesso contenuto = stessa partita).
+    direct: i PC che arrivano al cloud direttamente (rclone, Google Drive/OneDrive via API)
+    invece che da una cartella sincronizzata in ritardo."""
     rng = random.Random(seed)
     names = ["A", "B"]
     cloud = FakeCloudClient({n: tmp_path / f"cloud-{n}" for n in names})
@@ -116,11 +124,16 @@ def run_simulation(tmp_path, seed, steps=300, files=("slot1.sav", "slot2.sav"),
 
     def sync(pc):
         present = {p.read_bytes() for p in Path(pcs[pc][1].path).rglob("*") if p.is_file()}
+        if pc in direct:
+            cloud.sync_now(rng, pc)
         try:
             pcs[pc][0].sync_game(pcs[pc][1])
             seen_by_sync.update(present)  # solo se la sync è andata: sennò non è uscito dal PC
         except CloudBusy:
             pass
+        finally:
+            if pc in direct:
+                cloud.sync_now(rng, pc)
 
     for _ in range(steps):
         r = rng.random()
@@ -296,3 +309,21 @@ def test_multi_file_saves_with_deletions(tmp_path, seed, propagate, monkeypatch)
         actions = sorted((w for w in writes if w[2] == f), key=lambda w: w[0])
         if actions and actions[-1][3] is not None and actions[-1][3] in run_simulation.seen_by_sync:
             assert final["A"][f] == actions[-1][3], f"seed {seed}: {f} doveva essere {actions[-1][3]}"
+
+
+@pytest.mark.parametrize("multi", [False, True])
+@pytest.mark.parametrize("seed", range(int(os.environ.get("SIM_SEEDS_MIXED", "4"))))
+def test_folder_pc_and_direct_deck(tmp_path, seed, multi):
+    """Il PC usa la cartella di Proton Drive (in ritardo), il Deck lo stesso cloud via rclone
+    (diretto). Stesse garanzie: convergono, vince il più recente, mai salvataggi mescolati."""
+    files = ("ManualSave-1", "AutoSave-0") if multi else ("slot1.sav", "slot2.sav")
+    writes, final, pcs, cloud = run_simulation(tmp_path, 50_000 + seed, files=files,
+                                               multi=multi, direct=("B",))
+    for pc in ("A", "B"):
+        for f, v in final[pc].items():
+            assert not (isinstance(v, tuple) and v[0] == "MESCOLATO"), f"seed {seed}: {v}"
+    assert final["A"] == final["B"], f"seed {seed}: i PC non convergono: {final}"
+    for f in {w[2] for w in writes}:
+        latest = max((w for w in writes if w[2] == f), key=lambda w: w[0])
+        assert final["A"][f] == latest[3], f"seed {seed}: per {f} doveva vincere {latest[3]}"
+
