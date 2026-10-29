@@ -788,10 +788,26 @@ class SyncEngine:
             raise
         return tmp
 
+    def _check_untouched(self, game, rel):
+        """Prima di sostituire o cancellare un file locale: dev'essere ancora quello visto
+        dalla scansione. Se il gioco ha salvato nel frattempo, quel salvataggio nuovo non si
+        tocca e si decide di nuovo al giro dopo."""
+        if self._scan is None:
+            return  # ripristino chiesto a mano, non una sync
+        p = Path(game.path, rel)
+        seen = self._scan.get(rel)
+        try:
+            st = p.stat()
+        except FileNotFoundError:
+            return  # non c'è (più): niente da perdere
+        if seen is None or self._hash(p, st) != seen["hash"]:
+            raise IOError(f"{rel} è appena cambiato in locale, riprovo al prossimo giro")
+
     def _commit(self, game, rel, tmp, entry, base, mtimes=None, track=True):
         """Sostituisce il file locale con quello scaricato (facendo prima il backup)."""
         dst = Path(game.path, rel)
         try:
+            self._check_untouched(game, rel)
             h = sha256_file(tmp)
             if dst.exists():
                 self._backup_local(game, rel)
@@ -821,6 +837,7 @@ class SyncEngine:
         self.log(f"[{game.name}] ✕ cloud {rel}")
 
     def _delete_local(self, game, rel, base):
+        self._check_untouched(game, rel)
         self._backup_local(game, rel)
         Path(game.path, rel).unlink(missing_ok=True)
         base.pop(rel, None)
