@@ -2,6 +2,32 @@
 
 (Fino alla 0.4.0 il progetto si chiamava SaveSync.)
 
+## 0.5.1
+
+Correzioni, ognuna con il suo test:
+
+- **Slot indipendenti nella stessa cartella** (es. `Saves/slot1.sav`, `Saves/slot2.sav`): la
+  0.5.0 li trattava come un unico salvataggio, quindi modificando slot diversi su due
+  dispositivi uno dei due finiva solo nei backup. Ora "una sottocartella = un salvataggio" si
+  usa solo quando la struttura lo dimostra (es. Cyberpunk); altrimenti ogni file per conto suo.
+- **Versioni appena caricate da un altro dispositivo** potevano essere cancellate dal limite di
+  spazio o dalla pulizia, se questo dispositivo non vedeva ancora il manifest nuovo (cartelle
+  cloud in ritardo). Ora le versioni delle ultime 2 ore non si cancellano mai.
+- **Fusi orari diversi** (es. Steam Deck rimasto su UTC): l'ordine delle versioni era sbagliato
+  di qualche ora. Ora i nomi delle versioni sono in UTC.
+- **Mentre giochi non carico nulla**: dopo un errore (es. file bloccato dal gioco) i tentativi
+  automatici caricavano comunque durante la partita. Ora aspettano che il gioco si chiuda.
+- L'istantanea all'avvio del gioco (lenta la prima volta) ritardava il download dell'ultimo
+  salvataggio: ora gira in parallelo.
+- **Steam Deck**: il rilevamento nei prefissi Proton ora ignora maiuscole e minuscole (Windows
+  non le distingue, Linux sì: alcuni giochi non venivano trovati). Anche i filtri dei file
+  (`*.SAV`) ora ignorano maiuscole e minuscole.
+- File temporanei rimasti da un download interrotto non vengono più caricati come salvataggi.
+- Riselezionando la vecchia cartella cloud `SaveSync` dopo il cambio di nome non si crea più un
+  cloud nuovo e vuoto dentro di essa.
+- Avviato dalla copia `SaveSync.exe`, ResoSync ora registra avvio automatico e opzioni di avvio
+  col nome nuovo.
+
 ## 0.5.0
 
 - **SaveSync ora si chiama ResoSync.** Aggiornando non si perde niente: i dati restano nella

@@ -105,7 +105,12 @@ def test_suggest_grouping(tmp_path):
     er = tmp_path / "er"
     er.mkdir()
     (er / "ER0000.sl2").write_text("x")
-    assert SyncEngine.suggest_grouping(er) == "folder"  # file singolo: nessuna differenza
+    assert SyncEngine.suggest_grouping(er) == "none"  # nessuna prova di salvataggi multi-file
+    saves = tmp_path / "saves"
+    (saves / "Saves").mkdir(parents=True)
+    for n in ("slot1.sav", "slot2.sav", "slot3.sav"):
+        (saves / "Saves" / n).write_text("x")
+    assert SyncEngine.suggest_grouping(saves) == "none"  # slot indipendenti: mai insieme
 
 
 def test_restore_whole_save(tmp_path):

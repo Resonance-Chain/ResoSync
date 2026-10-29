@@ -15,7 +15,14 @@ APP_NAME = "ResoSync"
 def app_command() -> list:
     """Come rilanciare questa app (exe di PyInstaller oppure python + main.py)."""
     if getattr(sys, "frozen", False):
-        return [sys.executable]
+        exe = Path(sys.executable)
+        if exe.stem.lower() == "savesync":
+            # avviato dalla copia col vecchio nome (vecchie opzioni Steam / avvio automatico):
+            # i comandi nuovi puntano a ResoSync
+            new = exe.with_name("ResoSync" + exe.suffix)
+            if new.exists():
+                return [str(new)]
+        return [str(exe)]
     main = str(Path(__file__).resolve().parent.parent / "main.py")
     exe = sys.executable
     if SYSTEM == "Windows":

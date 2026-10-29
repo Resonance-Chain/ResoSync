@@ -144,7 +144,9 @@ def test_service_snapshot_and_warning_on_game_start(tmp_path, monkeypatch):
 
 
 # ---------- spazio ----------
-def test_space_limit_and_cleanup(tmp_path):
+def test_space_limit_and_cleanup(tmp_path, monkeypatch):
+    import resosync.engine as em
+    monkeypatch.setattr(em, "GRACE", 0)  # qui si prova la pulizia, non la protezione
     a, g = pc(tmp_path, "A")
     for i in range(6):
         write(g, "s.sav", bytes([i]) * 400_000, 1000 + i)

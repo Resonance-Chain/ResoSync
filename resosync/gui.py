@@ -11,8 +11,8 @@ from tkinter import filedialog, messagebox, ttk
 from . import __version__, gamedb, system, updater
 from .dialogs import PreviewPanel, SnapshotDialog, StatusDialog, run_bg
 from .backends import make_backend
-from .config import Config, Game, slugify
-from .engine import SyncEngine
+from .config import Config, Game, cloud_folder_for, slugify
+from .engine import SyncEngine, stamp_epoch
 from .oauth import NeedsLogin, OAuthClient
 from .service import HAVE_WATCHDOG, SyncService, psutil
 
@@ -468,11 +468,11 @@ class App(tk.Tk):
     def sync_selected(self):
         g = self._selected()
         if g and self.service:
-            self.service.request_sync(g.id)
+            self.service.request_sync(g.id, while_playing=True)  # chiesta a mano: si fa
 
     def sync_all(self):
         if self.service:
-            self.service.request_sync()
+            self.service.request_sync(while_playing=True)
 
     def open_folder(self):
         g = self._selected()
@@ -545,7 +545,7 @@ class GameDialog(tk.Toplevel):
         self.group_labels = {"folder": "una sottocartella (es. Cyberpunk: ManualSave-12/)",
                              "name": "i file con lo stesso nome (es. Save1.ess + Save1.skse)",
                              "none": "ogni file da solo"}
-        self.group_by = tk.StringVar(value=self.group_labels[game.group_by if game else "folder"])
+        self.group_by = tk.StringVar(value=self.group_labels[game.group_by if game else "none"])
         self.max_mb = tk.StringVar(value=str(game.max_cloud_mb if game else 0))
         self.enabled = tk.BooleanVar(value=game.enabled if game else True)
 
@@ -896,12 +896,9 @@ class RestoreDialog(tk.Toplevel):
     def _show_versions(self, versions):
         self.versions = versions
         self.vlist.delete(0, "end")
-        for stamp, origin, _ in versions:
-            try:
-                pretty = time.strftime("%d/%m/%Y %H:%M:%S",
-                                       time.strptime(stamp[:15], "%Y%m%d-%H%M%S"))
-            except ValueError:
-                pretty = stamp
+        for stamp, origin, ref in versions:
+            t = stamp_epoch(Path(ref).name)
+            pretty = time.strftime("%d/%m/%Y %H:%M:%S", time.localtime(t)) if t else stamp
             self.vlist.insert("end", f"{pretty}   [{origin}]")
         if not versions:
             self.vlist.insert("end", "(nessuna versione precedente)")
@@ -1179,9 +1176,7 @@ class SettingsDialog(tk.Toplevel):
     def _browse(self):
         d = filedialog.askdirectory(parent=self)
         if d:
-            p = Path(d)
-            self.v["folder_path"].set(os.path.normpath(p if p.name == "ResoSync"
-                                                       else p / "ResoSync"))
+            self.v["folder_path"].set(os.path.normpath(cloud_folder_for(d)))
 
     def _save(self):
         s = self.app.cfg.settings

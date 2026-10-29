@@ -335,17 +335,51 @@ def _subdirs(folder):
 _MAGIC = re.compile(r"[*?\[]")
 
 
-def _expand(path: str, ph: dict, installs: list) -> list:
-    """Percorso del manifest -> pattern glob concreti per questo PC."""
+def _ci(text: str) -> str:
+    """Pattern glob che ignora maiuscole/minuscole: 'Save' -> '[sS][aA][vV][eE]'.
+    Le parti già glob ([...], *, ?) e i segnaposto <...> restano come sono."""
+    out, i = [], 0
+    while i < len(text):
+        c = text[i]
+        if c == "[":
+            j = text.find("]", i + 2)
+            if j != -1:
+                out.append(text[i:j + 1])
+                i = j + 1
+                continue
+        if c == "<":
+            j = text.find(">", i)
+            if j != -1:
+                out.append(text[i:j + 1])
+                i = j + 1
+                continue
+        out.append(f"[{c.lower()}{c.upper()}]" if c.isalpha() and c.lower() != c.upper() else c)
+        i += 1
+    return "".join(out)
+
+
+def _expand(path: str, ph: dict, installs: list, ci: bool = False) -> list:
+    """Percorso del manifest -> pattern glob concreti per questo PC.
+    ci=True (giochi Windows dentro un prefisso Proton/Wine): Windows non distingue maiuscole e
+    minuscole, quindi il database può dire "eldenring" dove la cartella vera è "EldenRing".
+    Solo la parte che viene dal database diventa insensibile, la radice nota resta esatta."""
     if "<storeUserId>" in path:
         path = path.replace("<storeUserId>", "*")
     if "<game>" in path or "<base>" in path or "<root>" in path:
         out = []
         for root, base, game in installs:
-            out += _expand(path.replace("<base>", glob.escape(base))
-                           .replace("<root>", glob.escape(root))
-                           .replace("<game>", glob.escape(game)), ph, [])
+            sub = {"<base>": glob.escape(base), "<root>": glob.escape(root),
+                   "<game>": glob.escape(game)}
+            lead = next((k for k in sub if path.startswith(k)), None)
+            rest = path[len(lead):] if lead else path
+            for k, v in sub.items():
+                rest = rest.replace(k, v)
+            expanded = (sub[lead] if lead else "") + (_ci(rest) if ci else rest)
+            out += _expand(expanded, ph, [], ci=False)
         return out
+    lead = next((k for k in ph if path.startswith(k)), None)
+    if ci and lead:
+        path = lead + _ci(path[len(lead):])
     for k, v in ph.items():
         if k in path:
             path = path.replace(k, glob.escape(str(v).replace("\\", "/")))
@@ -364,7 +398,7 @@ def _static_prefix(pattern: str) -> str:
     return "/".join(keep)
 
 
-def _match(g, ph, installs, system) -> list:
+def _match(g, ph, installs, system, ci=False) -> list:
     """Percorsi di salvataggio di un gioco che esistono davvero: [(cartella, pattern|None, mtime)]"""
     matches = []
     for path, oses in g["f"]:
@@ -372,7 +406,7 @@ def _match(g, ph, installs, system) -> list:
             continue
         if ("<base>" in path or "<root>" in path or "<game>" in path) and not installs:
             continue
-        for pattern in _expand(path, ph, installs):
+        for pattern in _expand(path, ph, installs, ci=ci):
             prefix = _static_prefix(pattern)
             if prefix != pattern and not os.path.isdir(prefix):
                 continue
@@ -436,11 +470,12 @@ def detect(db: dict, progress=lambda done, total: None) -> list:
                     folder = app_dirs[appid][1]
                     inst = [(str(lib), str(folder), folder.name)]
                     install_dir = install_dir or str(folder)
-                m = _match(g, proton_placeholders(pfx), inst, "windows")
+                m = _match(g, proton_placeholders(pfx), inst, "windows", ci=True)
                 matches += m
                 proton = proton or bool(m)
         if heroic and _norm_title(name) in heroic:
-            m = _match(g, proton_placeholders(heroic[_norm_title(name)]), [], "windows")
+            m = _match(g, proton_placeholders(heroic[_norm_title(name)]), [], "windows",
+                       ci=True)
             matches += m
             proton = proton or bool(m)
         if not matches:

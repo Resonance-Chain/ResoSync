@@ -36,6 +36,19 @@ def slugify(name: str) -> str:
     return slug or "gioco"
 
 
+def cloud_folder_for(selected) -> Path:
+    """Cartella scelta con "Sfoglia" -> cartella dei dati. Di solito una sottocartella
+    ResoSync, ma se lì ci sono già i dati (anche di quando si chiamava SaveSync) si usa
+    quella: sennò si creerebbe un cloud nuovo e vuoto e i PC smetterebbero di vedersi."""
+    p = Path(selected)
+    if p.name.lower() in ("resosync", "savesync") or (p / "games.json").exists():
+        return p
+    for name in ("ResoSync", "SaveSync"):
+        if (p / name / "games.json").exists():
+            return p / name
+    return p / "ResoSync"
+
+
 def process_names(text: str) -> set:
     """'EldenRing.exe, eldenring' -> {'eldenring'}: niente maiuscole né .exe."""
     out = set()
@@ -61,7 +74,7 @@ class Game:
     install_dir: str = ""  # cartella d'installazione: qualsiasi exe lì dentro = "in gioco"
     mode: str = "sync"     # sync = tra i PC | backup = solo copia sul cloud (gioco col suo cloud)
     max_cloud_mb: int = 0  # limite spazio delle versioni sul cloud (0 = nessun limite)
-    group_by: str = "folder"  # cos'è UN salvataggio: folder (sottocartella) | name | none
+    group_by: str = "none"  # cos'è UN salvataggio: folder (sottocartella) | name | none
 
 
 @dataclass
@@ -120,6 +133,11 @@ class Config:
             known_g = Game.__dataclass_fields__
             cfg.games = [Game(**{k: v for k, v in g.items() if k in known_g})
                          for g in data.get("games", [])]
+            for raw_g, game in zip(data.get("games", []), cfg.games):
+                if "group_by" not in raw_g:
+                    # giochi aggiunti prima della 0.5.1: decido guardando la loro cartella
+                    from .engine import SyncEngine
+                    game.group_by = SyncEngine.suggest_grouping(game.path)
             migrate = any(raw.get(k) for k in SECRET_FIELDS)  # versioni vecchie: segreti in chiaro
         for k in SECRET_FIELDS:
             if not getattr(cfg.settings, k):

@@ -10,6 +10,7 @@ Così sappiamo chi ha cambiato cosa:
   entrambi         -> conflitto: vince il più recente, l'altro finisce nelle versioni
 Prima di sovrascrivere qualcosa (sul cloud o in locale) se ne tiene sempre una copia.
 """
+import calendar
 import fnmatch
 import hashlib
 import json
@@ -41,9 +42,41 @@ def sha256_file(path: Path) -> str:
 
 
 def _stamp() -> str:
-    # millisecondi inclusi: due backup nello stesso secondo non devono sovrascriversi
+    """Data per i nomi di versioni e backup: in UTC (la Z finale), così l'ordine è giusto
+    anche tra dispositivi con fusi orari diversi (es. uno Steam Deck rimasto su UTC).
+    Millisecondi inclusi: due versioni nello stesso secondo non devono sovrascriversi."""
     now = time.time()
-    return time.strftime("%Y%m%d-%H%M%S", time.localtime(now)) + f"-{int(now * 1000) % 1000:03d}"
+    return time.strftime("%Y%m%d-%H%M%S", time.gmtime(now)) + f"-{int(now * 1000) % 1000:03d}Z"
+
+
+def stamp_epoch(name: str):
+    """'20261029-101500-123Z__PC__hash' -> secondi (None se non è una data). I nomi senza Z
+    sono delle versioni fino alla 0.5.0, scritti in ora locale."""
+    st = name.split("__")[0]
+    try:
+        base = time.strptime(st[:15], "%Y%m%d-%H%M%S")
+    except ValueError:
+        return None
+    ms = st[16:19]
+    frac = int(ms) / 1000 if ms.isdigit() else 0
+    return (calendar.timegm(base) if st[19:20] == "Z" else time.mktime(base)) + frac
+
+
+def _by_date(names):
+    """Ordina dalla più vecchia; i nomi senza data vanno in fondo (non si cancellano per primi)."""
+    return sorted(names, key=lambda n: (stamp_epoch(str(n).replace("\\", "/").rsplit("/", 1)[-1])
+                                        or float("inf"), str(n)))
+
+
+# Una versione appena caricata da un altro dispositivo può non comparire ancora nel manifest
+# che vediamo (le cartelle cloud consegnano i file in ritardo): per un po' non si cancella.
+GRACE = 2 * 3600
+TEMP_SUFFIXES = (".resosync-tmp", ".savesync-tmp", ".partial")
+
+
+def _young(name) -> bool:
+    t = stamp_epoch(str(name).replace("\\", "/").rsplit("/", 1)[-1])
+    return t is not None and t > time.time() - GRACE
 
 
 class SyncEngine:
@@ -171,9 +204,14 @@ class SyncEngine:
     # ---------- scansione locale ----------
     @staticmethod
     def matches(game, rel: str) -> bool:
+        # senza distinguere maiuscole: su Windows "*.SAV" prende "slot.sav", e i giochi
+        # Windows sotto Proton (Steam Deck) non sono abituati a un sistema che le distingue
+        rel = rel.lower()
         name = rel.rsplit("/", 1)[-1]
+
         def hit(patterns):
-            return any(fnmatch.fnmatch(rel, p) or fnmatch.fnmatch(name, p) for p in patterns)
+            return any(fnmatch.fnmatchcase(rel, p.lower()) or fnmatch.fnmatchcase(name, p.lower())
+                       for p in patterns)
         return hit(game.patterns or ["*"]) and not hit(game.excludes)
 
     def _hash(self, path: Path, st) -> str:
@@ -191,6 +229,8 @@ class SyncEngine:
         unreadable = self._unreadable[game.id] = set()
         for dirpath, dirs, files in os.walk(root):
             for f in files:
+                if f.endswith(TEMP_SUFFIXES):
+                    continue  # rimasugli di un download o di una copia interrotti
                 p = Path(dirpath, f)
                 rel = p.relative_to(root).as_posix()
                 if not self.matches(game, rel):
@@ -367,8 +407,8 @@ class SyncEngine:
                    if not e.get("deleted")}
         sizes = self.backend.sizes(f"{game.id}/blobs/")
         sizes.update(self.backend.sizes(f"{game.id}/versions/"))
-        old = [(k, v or 0) for k, v in sizes.items() if k not in current]
-        return sorted(old, key=lambda kv: kv[0].rsplit("/", 1)[-1])  # nome = data
+        old = {k: v or 0 for k, v in sizes.items() if k not in current and not _young(k)}
+        return [(k, old[k]) for k in _by_date(old)]
 
     def enforce_space(self, game) -> int:
         """Cancella le versioni più vecchie finché il gioco sta nel suo limite di spazio.
@@ -688,10 +728,11 @@ class SyncEngine:
             pass  # file vecchio già sparito: niente da migrare
 
     def _prune(self, blobs, keep):
-        """Tiene il blob attuale + le ultime `max_versions` versioni."""
-        blobs = sorted(set(blobs))
-        old = [b for b in blobs if b != keep]
+        """Tiene il blob attuale + le ultime `max_versions` versioni (e quelle appena arrivate)."""
+        old = [b for b in _by_date(set(blobs)) if b != keep]
         for b in old[:-self.settings.max_versions] if self.settings.max_versions > 0 else []:
+            if _young(b):
+                continue
             try:
                 self.backend.delete(b)
             except Exception:
@@ -701,7 +742,7 @@ class SyncEngine:
         src = Path(game.path, rel)
         folder = self.app_dir / "backups" / game.id / rel
         folder.mkdir(parents=True, exist_ok=True)
-        existing = sorted(folder.iterdir())
+        existing = _by_date(folder.iterdir())
         if existing and existing[-1].stat().st_size == src.stat().st_size and \
                 sha256_file(existing[-1]) == sha256_file(src):
             return  # identico all'ultimo backup
@@ -709,7 +750,7 @@ class SyncEngine:
         while dst.exists():
             dst = dst.with_name(dst.name + "_")
         shutil.copy2(src, dst)
-        old = sorted(folder.iterdir())
+        old = _by_date(folder.iterdir())
         for o in old[:-self.settings.max_versions] if self.settings.max_versions > 0 else []:
             o.unlink()
 
@@ -730,7 +771,7 @@ class SyncEngine:
         if local_dir.exists():
             for p in local_dir.iterdir():
                 out.append((p.name, "backup locale", str(p)))
-        return sorted(out, reverse=True)
+        return sorted(out, key=lambda v: stamp_epoch(Path(v[2]).name) or 0, reverse=True)
 
     # ---------- anteprima di una versione ----------
     IMAGE_EXT = (".png", ".jpg", ".jpeg", ".bmp", ".webp")
@@ -780,7 +821,7 @@ class SyncEngine:
             out["info"] = self._json_info(data)
         if out["image"] and out["info"]:
             return out
-        stamp = Path(ref).name.split("__")[0][:15]
+        stamp = Path(ref).name
         folder = rel.rsplit("/", 1)[0] if "/" in rel else ""
         # versioni dei file vicini, caricate entro 10 minuti da questa
         candidates = []
@@ -789,21 +830,17 @@ class SyncEngine:
             for f in (root.iterdir() if root.is_dir() else []):
                 if f.is_dir() and f.name != Path(rel).name:
                     for v in f.iterdir():
-                        candidates.append((f.name, "backup locale", str(v), v.name[:15]))
+                        candidates.append((f.name, "backup locale", str(v), v.name))
         else:
             prefix = f"{game.id}/blobs/{folder}/" if folder else f"{game.id}/blobs/"
             for key in self.backend.list(prefix):
                 parts = key[len(prefix):].split("/")
                 if len(parts) == 2 and parts[0] != Path(rel).name:
-                    candidates.append((parts[0], "cloud", key, parts[1][:15]))
+                    candidates.append((parts[0], "cloud", key, parts[1]))
 
         def distance(c):
-            try:
-                a = time.mktime(time.strptime(stamp, "%Y%m%d-%H%M%S"))
-                b = time.mktime(time.strptime(c[3], "%Y%m%d-%H%M%S"))
-                return abs(a - b)
-            except ValueError:
-                return float("inf")
+            a, b = stamp_epoch(stamp), stamp_epoch(c[3])
+            return abs(a - b) if a is not None and b is not None else float("inf")
         for name, org, key, _ in sorted(candidates, key=distance):
             if distance((name, org, key, _)) > 600:
                 break
@@ -816,21 +853,30 @@ class SyncEngine:
     @staticmethod
     def suggest_grouping(folder) -> str:
         """Guarda come il gioco organizza i file e propone cos'è UN salvataggio."""
+        # Si raggruppa SOLO se la struttura lo dimostra: raggruppare file indipendenti (es.
+        # Saves/slot1 e Saves/slot2) farebbe perdere le modifiche fatte in parallelo su due PC.
         root = Path(folder)
         try:
             subdirs = [d for d in root.iterdir() if d.is_dir()]
             files = [f.name for f in root.iterdir() if f.is_file()]
         except OSError:
+            return "none"
+
+        def kinds(d):
+            try:
+                return {f.suffix.lower() or f.name.lower() for f in d.iterdir() if f.is_file()}
+            except OSError:
+                return set()
+        # tante cartelle con dentro lo stesso tipo di file (sav.dat + metadata.json + ...)
+        multi = [kinds(d) for d in subdirs if len(kinds(d)) >= 2]
+        if len(multi) >= 2 and len(set.intersection(*multi)) >= 2:
             return "folder"
-        multi = [d for d in subdirs if sum(1 for f in d.iterdir() if f.is_file()) >= 2]
-        if len(multi) >= 2:
-            return "folder"  # tante cartelle con più file dentro: ognuna è un salvataggio
         stems = {}
         for f in files:
             stems.setdefault(f.split(".", 1)[0], set()).add(f)
         if sum(1 for v in stems.values() if len(v) >= 2) >= 2:
             return "name"  # Save1.ess + Save1.skse, Save2.ess + Save2.skse...
-        return "folder"
+        return "none"
 
     def restore_group(self, game, rel, origin, ref) -> list:
         """Rimette TUTTI i file del salvataggio di `rel` com'erano nel momento della versione
@@ -838,15 +884,7 @@ class SyncEngine:
         key = self.group_key(game, rel)
         stamp = Path(ref).name.split("__")[0]
 
-        def secs(st):
-            """'20261028-152200-123' -> secondi con i millisecondi (i file dello stesso
-            salvataggio vengono caricati a pochi millisecondi l'uno dall'altro)."""
-            try:
-                t = time.mktime(time.strptime(st[:15], "%Y%m%d-%H%M%S"))
-            except ValueError:
-                return None
-            ms = st[16:19]
-            return t + (int(ms) / 1000 if ms.isdigit() else 0)
+        secs = stamp_epoch  # i file dello stesso salvataggio: a pochi ms l'uno dall'altro
         target = secs(stamp)
         members = {r for r in set(self.scan_local(game)) | set(self.remote_files(game))
                    if self.group_key(game, r) == key}

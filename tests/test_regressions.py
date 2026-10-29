@@ -147,7 +147,9 @@ def test_upgrade_from_020_layout(tmp_path):
     assert len([v for v in versions if v[1].startswith("cloud")]) == 3  # 2 blob + 1 vecchia
 
 
-def test_versions_are_pruned(tmp_path):
+def test_versions_are_pruned(tmp_path, monkeypatch):
+    import resosync.engine as em
+    monkeypatch.setattr(em, "GRACE", 0)  # qui si prova la pulizia, non la protezione
     a, ga, _ = pc(tmp_path, "A", max_versions=2)
     for i in range(6):
         write(ga, "s.sav", b"v%d" % i, 1000 + i)
@@ -216,3 +218,23 @@ def test_empty_cloud_never_propagates_deletes(tmp_path):
     st = a2.sync_game(ga)
     assert st["deleted"] == 0 and st["up"] == 1
     assert Path(ga.path, "slot.sav").read_bytes() == b"progressi"
+
+
+
+def test_fresh_versions_are_protected(tmp_path):
+    """Le versioni appena create non si cancellano: potrebbero essere il salvataggio nuovo di
+    un altro PC che questo non vede ancora. Superato il periodo di protezione sì."""
+    import resosync.engine as em
+    a, ga, _ = pc(tmp_path, "A", max_versions=1)
+    for i in range(4):
+        write(ga, "s.sav", b"v%d" % i, 1000 + i)
+        a.sync_game(ga)
+    assert len(list((tmp_path / "cloud/g/blobs/s.sav").iterdir())) == 4
+    old_grace = em.GRACE
+    em.GRACE = 0
+    try:
+        write(ga, "s.sav", b"v4", 2000)
+        a.sync_game(ga)
+    finally:
+        em.GRACE = old_grace
+    assert len(list((tmp_path / "cloud/g/blobs/s.sav").iterdir())) == 2  # attuale + 1

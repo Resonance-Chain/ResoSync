@@ -21,7 +21,8 @@ try:
 except ImportError:
     psutil = None
 
-BUSY_RETRY = 15  # secondi prima di riprovare se un altro PC tiene il lock
+BUSY_RETRY = 15   # secondi prima di riprovare se un altro PC tiene il lock
+ERROR_RETRY = 30  # secondi prima di riprovare dopo un errore (es. file bloccato dal gioco)
 
 
 def wine_exe(cmdline) -> tuple:
@@ -146,7 +147,8 @@ class SyncService:
         self.engine = engine
         self.on_event = on_event
         self._pending = {}         # game_id -> istante in cui far partire la sync
-        self._forced = set()       # sync da fare anche se il gioco è aperto / auto sync spento
+        self._forced = set()       # sync da fare anche con la sincronizzazione automatica spenta
+        self._allow_playing = set()  # sync da fare anche se il gioco è aperto
         self._playing = {}         # game_id -> True se il processo del gioco è attivo
         self._heartbeat = {}       # game_id -> ultimo aggiornamento di "sto giocando"
         self._lock = threading.Lock()
@@ -183,12 +185,16 @@ class SyncService:
             self._pending[game_id] = time.time() + self.config.settings.debounce_seconds
         self.on_event("status", game_id, "Modifiche rilevate…")
 
-    def request_sync(self, game_id=None, delay=0.0):
+    def request_sync(self, game_id=None, delay=0.0, while_playing=False):
+        """while_playing=True: anche se il gioco è aperto (sync all'avvio del gioco, o chiesta
+        a mano). Le altre (tentativi dopo un errore, ...) aspettano che il gioco si chiuda."""
         ids = [game_id] if game_id else [g.id for g in self.config.games if g.enabled]
         with self._lock:
             for gid in ids:
                 self._pending[gid] = time.time() + delay
                 self._forced.add(gid)
+                if while_playing:
+                    self._allow_playing.add(gid)
 
     def rewatch(self):
         self._watch()
@@ -245,7 +251,7 @@ class SyncService:
                 self._game_started(g)
                 # scarico subito l'ultima versione (spesso il gioco carica il salvataggio
                 # solo dal menu, quindi si fa ancora in tempo)
-                self.request_sync(g.id)
+                self.request_sync(g.id, while_playing=True)
             elif was and not now:
                 self.on_event("log", f"[{g.name}] gioco chiuso, carico i salvataggi")
                 self._presence(g, False)
@@ -254,12 +260,15 @@ class SyncService:
                 self._presence(g, True)
 
     def _game_started(self, g):
-        # 1. istantanea della cartella: "com'era prima di giocare"
-        try:
-            if self.engine.snapshot(g, "avvio del gioco"):
-                self.on_event("log", f"[{g.name}] istantanea della cartella salvata")
-        except Exception as e:
-            self.on_event("log", f"[{g.name}] istantanea non riuscita: {e}")
+        # 1. istantanea della cartella: "com'era prima di giocare". In parallelo: la prima
+        # volta può copiare GB e non deve ritardare il download dell'ultimo salvataggio
+        def snap():
+            try:
+                if self.engine.snapshot(g, "avvio del gioco"):
+                    self.on_event("log", f"[{g.name}] istantanea della cartella salvata")
+            except Exception as e:
+                self.on_event("log", f"[{g.name}] istantanea non riuscita: {e}")
+        threading.Thread(target=snap, daemon=True).start()
         # 2. qualcun altro sta giocando allo stesso gioco?
         try:
             others = self.engine.others_playing(g)
@@ -301,10 +310,14 @@ class SyncService:
 
             with self._lock:
                 due = [gid for gid, t in self._pending.items()
-                       if t <= now and (s.auto_sync or gid in self._forced)]
+                       if t <= now and (s.auto_sync or gid in self._forced)
+                       and not (self.is_playing(gid) and s.sync_only_after_exit
+                                and gid not in self._allow_playing)]
+                # le altre restano in attesa: partono quando il gioco si chiude
                 for gid in due:
                     del self._pending[gid]
                     self._forced.discard(gid)
+                    self._allow_playing.discard(gid)
             for gid in due:
                 self._run(gid)
             self._stop.wait(0.5)
@@ -339,4 +352,4 @@ class SyncService:
                           "è in Ripristina versione.")
         if st["errors"]:
             # di solito file bloccati dal gioco: riprovo tra poco
-            self.request_sync(gid, delay=30)
+            self.request_sync(gid, delay=ERROR_RETRY)

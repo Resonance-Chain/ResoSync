@@ -198,7 +198,7 @@ class StatusDialog(tk.Toplevel):
     def _cleanup(self):
         keep = simpledialog.askinteger(
             "Pulisci versioni vecchie", "Quante versioni vecchie tenere per ogni file?\n"
-            "(i salvataggi attuali non vengono mai toccati)", parent=self,
+            "(i salvataggi attuali e le versioni delle ultime 2 ore non vengono toccati)", parent=self,
             minvalue=0, maxvalue=1000, initialvalue=3)
         if keep is None:
             return
