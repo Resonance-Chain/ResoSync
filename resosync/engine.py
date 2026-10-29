@@ -313,6 +313,20 @@ class SyncEngine:
             self.log(f"[{game.name}] la cartella è vuota: non propago le cancellazioni, "
                      f"riscarico dal cloud")
             propagate = False
+        gone = [r for r in base if r not in local and r not in skip and r in remote]
+        if propagate and len(gone) >= 3 and len(gone) * 2 > len(base):
+            # Sparita più di metà dei salvataggi in un colpo (gioco reinstallato che lascia
+            # solo il config, cartella ripulita da un programma): non lo propago agli altri PC
+            self.log(f"[{game.name}] spariti {len(gone)} file su {len(base)} tutti insieme: "
+                     f"non propago le cancellazioni, li riscarico")
+            propagate = False
+        tombs = [r for r, e in manifest["files"].items() if e.get("deleted") and r in local
+                 and base.get(r) == local[r]["hash"]]
+        if propagate and len(tombs) >= 3 and len(tombs) * 2 > len(local):
+            # stesso discorso, al contrario: un altro PC chiede di cancellare quasi tutto
+            self.log(f"[{game.name}] il cloud chiede di cancellare {len(tombs)} file su "
+                     f"{len(local)}: non lo faccio, li ricarico")
+            propagate = False
 
         # cancellazioni segnate nel manifest: servono a riconoscere quelle vecchie arrivate
         # in ritardo (vedi _stale_delete)
