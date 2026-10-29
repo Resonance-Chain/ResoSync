@@ -71,7 +71,7 @@ def _by_date(names):
 # Una versione appena caricata da un altro dispositivo può non comparire ancora nel manifest
 # che vediamo (le cartelle cloud consegnano i file in ritardo): per un po' non si cancella.
 GRACE = 2 * 3600
-TEMP_SUFFIXES = (".resosync-tmp", ".savesync-tmp", ".partial")
+TEMP_SUFFIXES = (".resosync-tmp", ".resosync-old", ".savesync-tmp", ".partial")
 
 
 def _young(name) -> bool:
@@ -720,15 +720,56 @@ class SyncEngine:
             for _, tmp in fetched:
                 tmp.unlink(missing_ok=True)
             raise
-        for r, tmp in fetched:
-            self._commit(game, r, tmp, remote[r], base, mtimes)
-            stats["down"] += 1
-        for r in rels:
-            if r in local and r not in remote:
+        # Anche la sostituzione è tutto o niente: tengo una copia dei file attuali e, se una
+        # si blocca a metà (file aperto dall'antivirus o dal gioco), rimetto com'era prima.
+        # Mai il sav.dat nuovo con il metadata vecchio.
+        drop = [r for r in rels if r in local and r not in remote]
+        saved = {r: (base.get(r), mtimes.get(r)) for r in rels}
+        olds, touched, done = {}, [], 0
+        try:
+            for r in [r for r, _ in fetched] + drop:
+                self._check_untouched(game, r)
+                dst = Path(game.path, r)
+                if dst.exists():
+                    olds[r] = dst.with_name(dst.name + ".resosync-old")
+                    shutil.copy2(dst, olds[r])
+            for r, tmp in fetched:
+                touched.append(r)
+                self._commit(game, r, tmp, remote[r], base, mtimes)
+                stats["down"] += 1
+                done += 1
+            for r in drop:
                 # non fa parte del salvataggio vincente: va nei backup e si toglie
+                touched.append(r)
                 self._delete_local(game, r, base)
                 mtimes.pop(r, None)
-            elif r in remote and r not in todo:
+        except Exception:
+            for _, tmp in fetched:
+                tmp.unlink(missing_ok=True)
+            for r in reversed(touched):
+                dst = Path(game.path, r)
+                try:
+                    if r in olds:
+                        replace_retry(olds[r], dst)
+                        del olds[r]
+                    else:
+                        dst.unlink(missing_ok=True)
+                except OSError as e:  # la copia resta lì, non la cancello
+                    self.log(f"[{game.name}] non riesco a rimettere {r}: la copia è in "
+                             f"{olds.pop(r, dst)} ({e})")
+            for r, (h, t) in saved.items():  # anche la base torna com'era
+                for d, v in ((base, h), (mtimes, t)):
+                    if v is None:
+                        d.pop(r, None)
+                    else:
+                        d[r] = v
+            stats["down"] -= done
+            raise
+        finally:
+            for old in olds.values():
+                old.unlink(missing_ok=True)
+        for r in rels:
+            if r in remote and r not in todo:
                 base[r] = remote[r]["hash"]
                 mtimes[r] = remote[r].get("mtime", 0)
 
