@@ -335,3 +335,14 @@ def test_launcher_waits_for_save_still_arriving(tmp_path, monkeypatch):
     assert launcher.run("g", game_cmd, quiet=True) == 0
     assert seen.read_bytes() == b"nuova dal PC"
 
+
+# 10. un programma che riscrive il salvataggio con la stessa dimensione e rimette la data di
+#     prima (alcuni tool di backup/mod lo fanno): la modifica va vista lo stesso
+@pytest.mark.skipif(os.name == "nt", reason="su Windows st_ctime è la data di creazione")
+def test_change_with_same_size_and_mtime_detected(tmp_path):
+    a, ga = pc(tmp_path, "A")
+    write(ga, "s.sav", b"aaaa", 1000)
+    a.sync_game(ga)
+    write(ga, "s.sav", b"bbbb", 1000)
+    assert a.sync_game(ga)["up"] == 1
+    assert cloud_content(tmp_path, "s.sav") == b"bbbb"

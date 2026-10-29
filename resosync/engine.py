@@ -87,7 +87,7 @@ class SyncEngine:
         self.app_dir = Path(app_dir)
         self.log = log
         self.lock = threading.Lock()
-        self._hash_cache = {}  # path -> (size, mtime_ns, hash)
+        self._hash_cache = {}  # path -> ((size, mtime_ns, ctime_ns), hash)
         self._registered = set()
         self._unreadable = {}  # game_id -> file presenti ma bloccati in questo giro
         self._scan = None  # durante una sync: i file locali come li ha visti la scansione
@@ -218,12 +218,14 @@ class SyncEngine:
         return hit(game.patterns or ["*"]) and not hit(game.excludes)
 
     def _hash(self, path: Path, st) -> str:
-        key = str(path)
+        # anche il ctime: su Linux (Steam Deck) cambia a ogni scrittura, anche quando un
+        # programma rimette la data di modifica di prima
+        key, sig = str(path), (st.st_size, st.st_mtime_ns, st.st_ctime_ns)
         cached = self._hash_cache.get(key)
-        if cached and cached[0] == st.st_size and cached[1] == st.st_mtime_ns:
-            return cached[2]
+        if cached and cached[0] == sig:
+            return cached[1]
         h = sha256_file(path)
-        self._hash_cache[key] = (st.st_size, st.st_mtime_ns, h)
+        self._hash_cache[key] = (sig, h)
         return h
 
     def scan_local(self, game) -> dict:
@@ -903,6 +905,7 @@ class SyncEngine:
             replace_retry(tmp, dst)
         finally:
             tmp.unlink(missing_ok=True)
+            self._hash_cache.pop(str(dst), None)
         if entry and entry.get("mtime"):
             os.utime(dst, (entry["mtime"], entry["mtime"]))  # alcuni giochi guardano la data
         if track:
