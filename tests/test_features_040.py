@@ -132,8 +132,9 @@ def test_service_snapshot_and_warning_on_game_start(tmp_path, monkeypatch):
         svc.start()
         procs.append(("game", ""))
         end = time.time() + 10
-        while time.time() < end and not any(e[0] == "notify" for e in events):
-            time.sleep(0.1)
+        while time.time() < end and not (any(e[0] == "notify" for e in events)
+                                         and SnapshotStore(cfg.app_dir, "g").list()):
+            time.sleep(0.1)  # l'istantanea si fa in un thread a parte
         assert eng.others_playing  # il PC ha segnalato la sua presenza
         assert other.others_playing(og) == ["PC"]
     finally:
