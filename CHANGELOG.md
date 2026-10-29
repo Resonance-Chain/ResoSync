@@ -2,6 +2,20 @@
 
 (Fino alla 0.4.0 il progetto si chiamava SaveSync.)
 
+## 0.5.4 (in sviluppo)
+
+- **rclone**: nuovo tipo di cloud. Con [rclone](https://rclone.org) ResoSync arriva a più di 70
+  servizi, **Proton Drive compreso, anche sullo Steam Deck**: il Deck può usare direttamente la
+  stessa cartella Proton Drive del PC (vedi [STEAMDECK.md](STEAMDECK.md)). Un errore di rclone
+  (rete giù, login scaduto) non viene mai scambiato per "cloud vuoto".
+- **Servizio fermo senza avvisare**: un errore imprevisto nel giro del servizio lo faceva
+  morire, e ResoSync smetteva di sincronizzare e fare backup senza dire niente. Ora l'errore va
+  nel log e il servizio continua.
+- **Steam Deck, cambio di cloud**: il servizio in background continuava a usare il cloud
+  vecchio dopo che l'avevi cambiato. Ora si ricollega a quello nuovo.
+- **Impostazioni**: scegliendo un cloud senza completarlo, la finestra cancellava comunque lo
+  stato delle sincronizzazioni. Ora non cambia niente finché la configurazione non è completa.
+
 ## 0.5.3
 
 Caccia ai bug con un solo obiettivo: **nessun modo di perdere un salvataggio o di rovinarlo**.
