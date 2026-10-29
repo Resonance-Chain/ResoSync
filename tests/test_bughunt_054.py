@@ -104,3 +104,36 @@ def test_service_loop_survives_unexpected_errors(tmp_path, monkeypatch):
         svc.stop()
     assert (tmp_path / "cloud/g/manifest.json").exists(), "il servizio si è fermato"
     assert any(e[0] == "log" and "psutil" in str(e) for e in events)
+
+
+def test_headless_reload_switches_cloud(tmp_path, monkeypatch):
+    """Servizio del Deck: cambiando cloud nella configurazione, deve usare quello nuovo (non
+    continuare a scrivere su quello vecchio con lo stato delle sync appena azzerato)."""
+    import threading
+    import time
+    from test_deck import use_app_dir, wait_until
+    from resosync import headless
+    from resosync.config import Game
+    use_app_dir(monkeypatch, tmp_path / "app")
+    cfg = Config(app_dir=tmp_path / "app")
+    cfg.settings.folder_path = str(tmp_path / "vecchio")
+    cfg.settings.debounce_seconds = 1
+    saves = tmp_path / "saves"
+    saves.mkdir()
+    (saves / "s.sav").write_bytes(b"x")
+    cfg.games.append(Game("g", "G", str(saves)))
+    cfg.save()
+    stop = threading.Event()
+    t = threading.Thread(target=headless.run, args=(stop,), daemon=True)
+    t.start()
+    try:
+        assert wait_until(lambda: (tmp_path / "vecchio/g/manifest.json").exists())
+        time.sleep(1.1)
+        cfg2 = Config.load(cfg.app_dir)
+        cfg2.settings.folder_path = str(tmp_path / "nuovo")
+        cfg2.save()
+        assert wait_until(lambda: (tmp_path / "nuovo/g/manifest.json").exists(), 20), \
+            "il servizio usa ancora il cloud vecchio"
+    finally:
+        stop.set()
+        t.join(10)
