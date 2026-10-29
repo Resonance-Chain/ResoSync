@@ -7,6 +7,18 @@ import urllib.parse
 from pathlib import Path
 
 
+def retry_locked(fn, attempts=8):
+    """Su Windows il client cloud (Proton Drive, OneDrive, Dropbox) o l'antivirus possono
+    tenere un file aperto per un attimo mentre lo caricano: riprovo invece di fallire."""
+    for i in range(attempts):
+        try:
+            return fn()
+        except PermissionError:
+            if i == attempts - 1:
+                raise
+            time.sleep(0.25 * (i + 1))
+
+
 def replace_retry(src, dst, attempts=8):
     """os.replace, ma su Windows riprova: antivirus, indicizzatore o il client di
     Dropbox/OneDrive possono tenere il file aperto per qualche istante."""
@@ -66,7 +78,7 @@ class FolderBackend(Backend):
 
     def read_bytes(self, key):
         p = self._p(key)
-        return p.read_bytes() if p.exists() else None
+        return retry_locked(p.read_bytes) if p.exists() else None
 
     def write_bytes(self, key, data):
         p = self._p(key)
@@ -83,7 +95,7 @@ class FolderBackend(Backend):
         replace_retry(tmp, p)
 
     def download_file(self, key, path):
-        shutil.copyfile(self._p(key), path)
+        retry_locked(lambda: shutil.copyfile(self._p(key), path))
 
     def copy(self, src, dst):
         d = self._p(dst)

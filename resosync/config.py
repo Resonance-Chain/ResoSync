@@ -2,7 +2,9 @@
 import json
 import os
 import re
+import shutil
 import socket
+import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -125,8 +127,8 @@ class Config:
     def load(cls, app_dir: Path = APP_DIR) -> "Config":
         cfg = cls(app_dir=Path(app_dir))
         migrate = False
-        if cfg.file.exists():
-            data = json.loads(cfg.file.read_text(encoding="utf-8"))
+        data = cfg._read_config()
+        if data is not None:
             raw = data.get("settings", {})
             known = Settings.__dataclass_fields__
             cfg.settings = Settings(**{k: v for k, v in raw.items() if k in known})
@@ -154,7 +156,35 @@ class Config:
         data = {"settings": settings, "games": [asdict(g) for g in self.games]}
         tmp = self.file.with_suffix(".tmp")
         tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        if self.file.exists():
+            # copia dell'ultima configurazione buona, se questa si rovinasse
+            try:
+                json.loads(self.file.read_text(encoding="utf-8"))
+                shutil.copyfile(self.file, self.file.with_name("config.json.bak"))
+            except (OSError, ValueError):
+                pass
         replace_retry(tmp, self.file)
+
+    def _read_config(self):
+        """Legge config.json; se è rovinato (es. disco pieno) lo mette da parte e usa la
+        copia di sicurezza, invece di non partire più."""
+        if not self.file.exists():
+            return None
+        try:
+            return json.loads(self.file.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            broken = self.file.with_name(f"config.json.rovinato-{int(time.time())}")
+            try:
+                os.replace(self.file, broken)
+            except OSError:
+                pass
+            backup = self.file.with_name("config.json.bak")
+            try:
+                data = json.loads(backup.read_text(encoding="utf-8"))
+                shutil.copyfile(backup, self.file)
+                return data
+            except (OSError, ValueError):
+                return None
 
     def get_game(self, game_id: str):
         return next((g for g in self.games if g.id == game_id), None)

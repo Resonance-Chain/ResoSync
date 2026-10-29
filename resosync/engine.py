@@ -306,6 +306,9 @@ class SyncEngine:
                      f"riscarico dal cloud")
             propagate = False
 
+        # cancellazioni segnate nel manifest: servono a riconoscere quelle vecchie arrivate
+        # in ritardo (vedi _stale_delete)
+        self._tomb = {r: e for r, e in manifest["files"].items() if e.get("deleted")}
         ctx = {"game": game, "local": local, "remote": remote, "base": base, "mtimes": mtimes,
                "changes": changes, "stats": stats, "propagate": propagate}
         groups = {}
@@ -502,6 +505,13 @@ class SyncEngine:
                     stats["up"] += 1
                 elif R is not None:
                     self._download(game, rel, remote[rel], base, mtimes); stats["down"] += 1
+                elif propagate and self._stale_delete([rel], mtimes):
+                    # la cancellazione è più vecchia del mio salvataggio: è un manifest vecchio
+                    # arrivato in ritardo, non un "cancella" vero. Non cancello, ricarico.
+                    self.log(f"[{game.name}] cancellazione di {rel} più vecchia del mio "
+                             f"salvataggio: lo tengo e lo ricarico")
+                    self._upload(game, rel, False, changes, base, mtimes, remote)
+                    stats["up"] += 1
                 elif propagate:
                     self._delete_local(game, rel, base)
                     mtimes.pop(rel, None)
@@ -511,7 +521,19 @@ class SyncEngine:
                     stats["up"] += 1
             else:
                 stats["conflicts"] += 1
-                if L is None:
+                stale = R is not None and remote[rel].get("mtime", 0) < mtimes.get(rel, 0) - 0.001
+                if L is None and stale and propagate:
+                    # cancellato qui, e sul cloud c'è solo una versione PIÙ VECCHIA di quella
+                    # che avevo (manifest in ritardo): vince la cancellazione
+                    self._delete_remote(game, rel, changes, base, remote)
+                    mtimes.pop(rel, None)
+                    stats["deleted"] += 1
+                elif L is None and stale and B and self._restore_known(game, rel, B, base,
+                                                                       mtimes, changes, remote):
+                    # cancellato qui senza propagare: rimetto la versione più recente che
+                    # conoscevo, non quella vecchia che il cloud propone per errore
+                    stats["down"] += 1
+                elif L is None:
                     self._download(game, rel, remote[rel], base, mtimes); stats["down"] += 1
                 elif R is None:
                     self._upload(game, rel, False, changes, base, mtimes, remote)
@@ -555,6 +577,9 @@ class SyncEngine:
         R = {r: remote[r]["hash"] for r in rels if r in remote}
         B = {r: base[r] for r in rels if r in base}
         name = self.group_key(game, rels[0])
+        if not L and B and L != R:
+            self._group_deleted_here(rels, R, B, propagate, **ctx)
+            return
         if L == R or (L != B and R == B):
             # tutto uguale, oppure ho cambiato solo io (il cloud è fermo): file per file va bene
             for r in rels:
@@ -568,8 +593,8 @@ class SyncEngine:
                 self.log(f"[{game.name}] sul cloud c'è una versione più vecchia del "
                          f"salvataggio {name}: ricarico quella più recente")
                 self._push_group(rels, **ctx)
-            elif not R and not propagate:
-                self._push_group(rels, **ctx)  # sparito dal cloud: lo rimetto
+            elif not R and (not propagate or self._stale_delete(rels, mtimes)):
+                self._push_group(rels, **ctx)  # sparito dal cloud (o cancellazione vecchia)
             else:
                 self._apply_group(rels, propagate=True, **ctx)
             return
@@ -582,6 +607,78 @@ class SyncEngine:
             self.log(f"[{game.name}] CONFLITTO sul salvataggio {name}: vince il cloud, il "
                      f"locale va nei backup")
             self._apply_group(rels, propagate=True, **ctx)
+
+    def _restore_known(self, game, rel, h, base, mtimes, changes, remote) -> bool:
+        """Rimette in locale il contenuto con hash `h` preso dalle versioni sul cloud e lo
+        rende di nuovo quello attuale. False se quella versione non c'è più."""
+        keys = [k for k in self.backend.list(self._k_blobs(game.id, rel))
+                if k.endswith("__" + h[:16])]
+        if not keys:
+            return False
+        entry = {"hash": h, "blob": keys[-1], "mtime": mtimes.get(rel, 0)}
+        tmp = self._fetch(game, rel, entry)
+        self._commit(game, rel, tmp, entry, base, mtimes)
+        self.log(f"[{game.name}] {rel}: rimessa la versione più recente che conoscevo")
+        self._upload(game, rel, True, changes, base, mtimes, remote)  # torna quella attuale
+        return True
+
+    def _stale_delete(self, rels, mtimes) -> bool:
+        """Le cancellazioni nel manifest per questi file sono PIÙ VECCHIE del salvataggio che
+        ho (es. un altro PC ha cancellato, io poi ho salvato di nuovo, e il suo manifest è
+        arrivato dopo il mio): non valgono."""
+        tombs = [self._tomb[r].get("time", 0) for r in rels if r in getattr(self, "_tomb", {})]
+        mine = max((mtimes.get(r, 0) for r in rels), default=0)
+        return bool(tombs) and max(tombs) < mine - 0.001
+
+    def _group_deleted_here(self, rels, R, B, propagate, game, local, remote, base, mtimes,
+                            changes, stats):
+        """Lo slot è stato cancellato qui (tutti i suoi file). Sempre tutto insieme."""
+        ctx = dict(game=game, local=local, remote=remote, base=base, mtimes=mtimes,
+                   changes=changes, stats=stats)
+        known = max((mtimes.get(r, 0) for r in rels), default=0)
+        r_time = max((remote[r].get("mtime", 0) for r in R), default=0)
+        if R == B:  # il cloud è fermo: è solo la mia cancellazione
+            if propagate:
+                self._push_group(rels, **ctx)
+            else:
+                self._apply_group(rels, propagate=False, **ctx)  # lo rimetto, intero
+        elif R and r_time >= known - 0.001:
+            # sul cloud c'è una versione più nuova di quella che avevo: vince, intera
+            stats["conflicts"] += 1
+            self._apply_group(rels, propagate=True, **ctx)
+        elif propagate:
+            self._push_group(rels, **ctx)  # la cancellazione vince su una versione vecchia
+        elif not self._restore_known_group(rels, B, **ctx):
+            self._apply_group(rels, propagate=False, **ctx)
+
+    def _restore_known_group(self, rels, B, game, local, remote, base, mtimes, changes,
+                             stats) -> bool:
+        """Rimette INTERA la versione dello slot che conoscevo (quella in `B`), presa dalle
+        versioni sul cloud, e la rende di nuovo quella attuale. False se manca qualcosa."""
+        fetched = []
+        try:
+            for r, h in B.items():
+                keys = [k for k in self.backend.list(self._k_blobs(game.id, r))
+                        if k.endswith("__" + h[:16])]
+                if not keys:
+                    raise FileNotFoundError(r)
+                entry = {"hash": h, "blob": keys[-1], "mtime": mtimes.get(r, 0)}
+                fetched.append((r, entry, self._fetch(game, r, entry)))
+        except Exception:
+            for _, _, tmp in fetched:
+                tmp.unlink(missing_ok=True)
+            return False
+        for r, entry, tmp in fetched:
+            self._commit(game, r, tmp, entry, base, mtimes)
+            stats["down"] += 1
+        for r in rels:
+            if r in B:
+                self._upload(game, r, r in remote, changes, base, mtimes, remote)
+            elif r in remote:
+                self._delete_remote(game, r, changes, base, remote)
+        self.log(f"[{game.name}] slot {self.group_key(game, rels[0])}: rimessa la versione "
+                 f"più recente che conoscevo")
+        return True
 
     def _push_group(self, rels, game, local, remote, base, mtimes, changes, stats):
         """Il mio salvataggio vince intero: carico i miei file e tolgo dal manifest quelli

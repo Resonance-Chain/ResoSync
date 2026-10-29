@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       release:
-        description: "Versione da pubblicare come Release (es. 0.5.1). Vuoto = solo build"
+        description: "Versione da pubblicare come Release (es. 0.5.2). Vuoto = solo build"
         required: false
         default: ""
 
@@ -32,6 +32,8 @@ jobs:
           SIM_SEEDS: ${{ runner.os == 'Windows' && '3' || '8' }}
           SIM_SEEDS_MULTI: ${{ runner.os == 'Windows' && '2' || '6' }}
           SIM_SEEDS_LONG: ${{ runner.os == 'Windows' && '1' || '2' }}
+          SIM_SEEDS_DELETE: ${{ runner.os == 'Windows' && '2' || '4' }}
+          SIM_SEEDS_DELETE_MULTI: ${{ runner.os == 'Windows' && '1' || '2' }}
 
   windows:
     needs: test

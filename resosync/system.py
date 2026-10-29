@@ -112,8 +112,27 @@ def pause_service() -> bool:
     Ritorna True se era attivo, così si può riavviare alla chiusura."""
     if service_active():
         _systemctl("stop", SERVICE_NAME)
+        _resume_when_gone(os.getpid())
         return True
     return False
+
+
+def _resume_when_gone(pid: int) -> None:
+    """Passando dalla modalità desktop alla modalità gioco, il Deck chiude la sessione e la
+    finestra muore senza poter riavviare il servizio: senza questo, in modalità gioco non si
+    sincronizzerebbe più niente fino al riavvio. Il guardiano gira nel gestore utente di
+    systemd (sopravvive alla fine della sessione) e riavvia il servizio quando la finestra
+    non c'è più."""
+    if not shutil.which("systemd-run"):
+        return
+    try:
+        subprocess.run(["systemd-run", "--user", "--collect", "--quiet",
+                        f"--unit=resosync-resume-{pid}", "sh", "-c",
+                        f"while kill -0 {pid} 2>/dev/null; do sleep 5; done; "
+                        f"systemctl --user start {SERVICE_NAME}"],
+                       capture_output=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        pass
 
 
 def resume_service() -> None:

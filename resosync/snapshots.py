@@ -6,6 +6,7 @@ condivisi tra istantanee, quindi un file uguale in 10 istantanee occupa spazio u
 import json
 import os
 import shutil
+import threading
 import time
 from pathlib import Path
 
@@ -17,10 +18,22 @@ def _hash_file(path):
     return sha256_file(path)
 
 
+_LOCKS = {}
+_LOCKS_GUARD = threading.Lock()
+
+
+def _lock_for(root: Path) -> threading.RLock:
+    """Una sola istantanea alla volta per gioco: la pulizia di una non deve cancellare i
+    contenuti che l'altra sta ancora copiando."""
+    with _LOCKS_GUARD:
+        return _LOCKS.setdefault(str(root), threading.RLock())
+
+
 class SnapshotStore:
     def __init__(self, app_dir, game_id):
         self.root = Path(app_dir) / "snapshots" / game_id
         self.objects = self.root / "objects"
+        self._lock = _lock_for(self.root)
 
     def _obj(self, h):
         return self.objects / h[:2] / h
@@ -45,6 +58,10 @@ class SnapshotStore:
     def take(self, game_path, files: dict, reason: str, keep: int = 10):
         """files = {rel: {"hash", "size", "mtime"}} (da SyncEngine.scan_local).
         Ritorna l'id, o None se identica all'ultima (non serve rifarla)."""
+        with self._lock:
+            return self._take(game_path, files, reason, keep)
+
+    def _take(self, game_path, files, reason, keep):
         if not files:
             return None
         current = {r: e["hash"] for r, e in files.items()}
@@ -57,11 +74,17 @@ class SnapshotStore:
                 continue
             obj.parent.mkdir(parents=True, exist_ok=True)
             tmp = obj.with_suffix(".tmp")
-            shutil.copy2(Path(game_path, rel), tmp)
-            if _hash_file(tmp) != e["hash"]:  # cambiato mentre copiavo: salto questo file
+            try:
+                shutil.copy2(Path(game_path, rel), tmp)
+                if _hash_file(tmp) != e["hash"]:  # cambiato mentre copiavo: salto il file
+                    tmp.unlink(missing_ok=True)
+                    continue
+                replace_retry(tmp, obj)
+            except OSError:
+                # sparito o bloccato dal gioco proprio adesso: l'istantanea si fa lo stesso,
+                # senza questo file
                 tmp.unlink(missing_ok=True)
                 continue
-            replace_retry(tmp, obj)
         now = time.time()
         snap_id = time.strftime("%Y%m%d-%H%M%S", time.localtime(now)) + \
             f"-{int(now * 1000) % 1000:03d}"
@@ -104,6 +127,10 @@ class SnapshotStore:
         return total
 
     def restore(self, game_path, snap_id) -> int:
+        with self._lock:
+            return self._restore(game_path, snap_id)
+
+    def _restore(self, game_path, snap_id) -> int:
         """Rimette i file dell'istantanea (con data di adesso, così vincono alla prossima
         sincronizzazione e arrivano agli altri PC). I salvataggi nati dopo restano dove sono.
         Ritorna il numero di file rimessi."""

@@ -2,6 +2,30 @@
 
 (Fino alla 0.4.0 il progetto si chiamava SaveSync.)
 
+## 0.5.2
+
+Seconda caccia ai bug, soprattutto sulle **cancellazioni** (finora mai simulate):
+
+- **Salvataggio cancellato dal disco con "propaga cancellazioni" attivo**: se un altro
+  dispositivo aveva cancellato uno slot e tu poi ci avevi salvato sopra, il vecchio "cancellato"
+  arrivato in ritardo dal cloud eliminava il tuo salvataggio più recente. Ora una cancellazione
+  più vecchia del tuo salvataggio non vale.
+- **Ricompariva un salvataggio vecchio**: cancellando uno slot (senza propagazione) mentre il
+  cloud mostrava per errore una versione più vecchia, veniva rimessa quella vecchia. Ora viene
+  rimessa la versione più recente che il dispositivo conosceva.
+- **Slot da più file cancellati** (es. una cartella di Cyberpunk): ora rimessi, cancellati o
+  sostituiti sempre interi, mai a metà.
+- **Steam Deck**: passando alla modalità gioco con la finestra di ResoSync aperta, il servizio
+  restava fermo e in modalità gioco non si sincronizzava più niente fino al riavvio. Ora riparte
+  da solo.
+- **Proton Drive / OneDrive su Windows**: se il loro programma teneva aperto un file per un
+  attimo, la lettura falliva con un errore. Ora riprova.
+- **Istantanee**: un file sparito o bloccato durante la copia faceva fallire l'istantanea
+  intera; ora viene saltato solo quel file. Due istantanee nello stesso momento non si
+  intralciano più.
+- **config.json rovinato** (es. disco pieno): ResoSync non partiva più. Ora usa l'ultima copia
+  buona e mette da parte quella rovinata.
+
 ## 0.5.1
 
 Correzioni, ognuna con il suo test:
