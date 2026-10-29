@@ -41,6 +41,7 @@ Per i giochi che non sono nel database: **Aggiungi gioco** e indichi la cartella
 | **Google Drive** | Client ID + secret (vedi sotto) | accesso diretto, nessun programma extra |
 | **OneDrive** | Client ID (vedi sotto) | accesso diretto, nessun programma extra |
 | **S3** | bucket + chiavi | AWS, Cloudflare R2, Backblaze B2 (R2 e B2 hanno piani gratuiti) |
+| **rclone** | `nome:cartella` di un remote fatto con `rclone config` | oltre 70 cloud: Proton Drive, Dropbox, pCloud, Mega, SFTP, WebDAV... Serve [rclone](https://rclone.org) installato |
 
 ### Google Drive: creare il Client ID (5 minuti, gratis)
 

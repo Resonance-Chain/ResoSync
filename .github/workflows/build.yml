@@ -26,6 +26,12 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt pytest pytest-timeout pytest-github-actions-annotate-failures
+      - name: rclone (per i test del backend rclone; senza, quei test si saltano)
+        continue-on-error: true
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Windows ]; then choco install rclone -y --no-progress
+          else sudo apt-get install -y rclone; fi
       - run: python -m pytest -v --timeout=600 tests
         env:
           # le simulazioni sono lente sul disco dei runner Windows: lì ne bastano poche

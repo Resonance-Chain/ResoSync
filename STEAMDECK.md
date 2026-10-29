@@ -5,12 +5,15 @@ Tempo: circa 20 minuti la prima volta.
 
 ## Prima di iniziare: quale cloud
 
-PC e Deck devono usare **lo stesso cloud**. La cartella di Proton Drive non va bene sul Deck:
-Proton Drive su Linux non ha ancora un programma che sincronizza le cartelle. Usa uno di questi,
-che ResoSync raggiunge direttamente senza installare niente:
+PC e Deck devono usare **lo stesso cloud**. Sul Deck non c'è un programma di Proton Drive che
+sincronizza le cartelle, quindi hai due strade:
 
-- **OneDrive** (consigliato sul Deck): l'accesso non scade.
-- **Google Drive**: va bene, ma leggi la nota sul punto 3.
+- **Proton Drive con rclone** (dalla 0.5.4): il Deck legge e scrive direttamente la stessa
+  cartella Proton Drive che usa già il PC. Niente da spostare. Vedi
+  [Proton Drive con rclone](#proton-drive-con-rclone) qui sotto e salta il punto 1.
+- **OneDrive** (accesso diretto, l'accesso non scade) o **Google Drive** (leggi la nota sul
+  punto 3): ResoSync li raggiunge senza installare niente, ma PC e Deck devono passare entrambi
+  a quel cloud.
 
 > **Il cloud di Steam fa già metà del lavoro.** Per i giochi Steam con salvataggio su cloud
 > (Cyberpunk, Elden Ring, Hades...) Steam sincronizza già PC e Deck da solo. ResoSync serve
@@ -97,3 +100,39 @@ controlla le novità dal PC.
   ```
 
   I tuoi dati restano in `~/.resosync`.
+
+## Proton Drive con rclone
+
+[rclone](https://rclone.org) è un programma gratuito che parla con più di 70 cloud, Proton Drive
+compreso. ResoSync lo usa al posto della cartella sincronizzata.
+
+**Sul Deck** (modalità desktop, Konsole):
+
+```bash
+mkdir -p ~/.local/bin && cd /tmp
+curl -LO https://downloads.rclone.org/rclone-current-linux-amd64.zip
+unzip -o rclone-current-linux-amd64.zip
+cp rclone-*-linux-amd64/rclone ~/.local/bin/ && chmod +x ~/.local/bin/rclone
+```
+
+```bash
+~/.local/bin/rclone config
+```
+
+In `rclone config`: `n` (nuovo remote), nome **`proton`**, tipo **`protondrive`**, poi la tua
+email e la password di Proton (e il codice a due fattori se l'hai attivo). Il resto lascialo
+com'è.
+
+Poi in ResoSync: **Impostazioni > Cloud > rclone**, premi **Cerca** e scrivi il remote con la
+cartella che il PC usa già dentro Proton Drive, per esempio `proton:ResoSync` (o
+`proton:SaveSync` se l'avevi creata con il vecchio nome). **Salva.** Programma e file di config
+si possono lasciare vuoti: ResoSync trova rclone in `~/.local/bin` anche quando gira come
+servizio in modalità gioco.
+
+Sul PC non devi cambiare niente: continua a usare la cartella di Proton Drive. Se hai attivato
+la cifratura, usa la stessa passphrase anche sul Deck.
+
+> Il supporto di rclone per Proton Drive è ancora segnato come "beta" dagli autori di rclone.
+> ResoSync tiene comunque versioni e istantanee, e un errore di rclone non viene mai scambiato
+> per "cloud vuoto".
+
