@@ -817,12 +817,16 @@ class DetectDialog(tk.Toplevel):
         q = self.query.get().lower().strip()
         shown = 0
         for i, d in enumerate(self.results):
-            if slugify(d.name) in have_ids or os.path.normcase(d.folder) in have_paths:
+            if slugify(d.name) in have_ids or d.folder and \
+                    os.path.normcase(d.folder) in have_paths:
                 continue
             if q and q not in d.name.lower():
                 continue
             when = time.strftime("%d/%m/%Y", time.localtime(d.mtime)) if d.mtime else ""
-            self.tree.insert("", "end", iid=str(i), values=(d.name, d.folder, d.files, when,
+            where = d.folder or "(registro di Windows)"
+            if d.folder and d.registry:
+                where += "  + registro"
+            self.tree.insert("", "end", iid=str(i), values=(d.name, where, d.files, when,
                                                             ", ".join(d.store_cloud)))
             shown += 1
         self.info.config(text=f"{shown} giochi con salvataggi trovati (non ancora aggiunti)")
@@ -847,10 +851,12 @@ class DetectDialog(tk.Toplevel):
             backup = answer
         for d in chosen:
             launch = f"steam://rungameid/{d.steam_id}" if d.steam_id else ""
-            game = Game(id=slugify(d.name), name=d.name, path=d.folder, patterns=d.patterns,
+            # salva solo nel registro: il file esportato sta in una cartella di ResoSync
+            folder = d.folder or str(self.app.cfg.app_dir / "registry-games" / slugify(d.name))
+            game = Game(id=slugify(d.name), name=d.name, path=folder, patterns=d.patterns,
                         process=d.process, launch=launch, install_dir=d.install_dir,
                         mode="backup" if backup and d.store_cloud else "sync",
-                        group_by=SyncEngine.suggest_grouping(d.folder))
+                        group_by=SyncEngine.suggest_grouping(folder), registry=d.registry)
             if self.app._save_game(None, game, quiet=True):
                 added += 1
         self._fill()

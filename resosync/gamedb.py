@@ -15,9 +15,11 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import registry
+
 MANIFEST_URL = "https://raw.githubusercontent.com/mtkennerly/ludusavi-manifest/master/data/manifest.yaml"
 MAX_AGE = 7 * 24 * 3600
-DB_FORMAT = 3  # cambia quando cambia cosa teniamo nella cache (forza un nuovo download)
+DB_FORMAT = 4  # cambia quando cambia cosa teniamo nella cache (forza un nuovo download)
 STORE_NAMES = {"steam": "Steam", "epic": "Epic", "gog": "GOG", "uplay": "Ubisoft",
                "origin": "EA"}
 SYSTEM = {"Windows": "windows", "Darwin": "mac"}.get(platform.system(), "linux")
@@ -35,6 +37,7 @@ class Detected:
     extra_folders: list = field(default_factory=list)
     install_dir: str = ""
     store_cloud: list = field(default_factory=list)  # es. ["Steam", "GOG"]
+    registry: list = field(default_factory=list)  # chiavi del registro di Windows trovate
 
 
 # ---------- download e cache ----------
@@ -93,22 +96,29 @@ def compact(raw: dict) -> dict:
     """Tiene solo i giochi con file di salvataggio e solo i campi utili."""
     out = {}
     for name, g in raw.items():
-        if not isinstance(g, dict) or not g.get("files"):
+        if not isinstance(g, dict) or not (g.get("files") or g.get("registry")):
             continue
         files = []
-        for path, info in g["files"].items():
+        for path, info in (g.get("files") or {}).items():
             info = info or {}
             tags = info.get("tags") or []
             if tags and "save" not in tags:
                 continue  # solo config, non ci interessa
             files.append([path, _oses(info.get("when"))])
-        if not files:
+        reg = []
+        for key, info in (g.get("registry") or {}).items():
+            tags = (info or {}).get("tags") or []
+            if (not tags or "save" in tags) and registry.supported(key):
+                reg.append(key)
+        if not files and not reg:
             continue
         exes = []
         for path, entries in (g.get("launch") or {}).items():
             oses = {o for e in (entries or []) for o in _oses(e.get("when"))}
             exes.append([path.rsplit("/", 1)[-1], sorted(oses)])
         entry = {"f": files}
+        if reg:
+            entry["r"] = sorted(reg)
         if g.get("installDir"):
             entry["d"] = list(g["installDir"])
         if exes:
@@ -425,7 +435,7 @@ def _match(g, ph, installs, system, ci=False) -> list:
     return [m for m in matches if os.path.normcase(m[0]) not in too_broad]
 
 
-def detect(db: dict, progress=lambda done, total: None) -> list:
+def detect(db: dict, progress=lambda done, total: None, reg_store=None) -> list:
     """Giochi con salvataggi su questo PC. Su Linux/Steam Deck guarda anche dentro i prefissi
     Proton (steamapps/compatdata/<id Steam>/pfx) e Heroic, usando i percorsi Windows."""
     games = db.get("games", {})
@@ -449,6 +459,8 @@ def detect(db: dict, progress=lambda done, total: None) -> list:
         heroic = heroic_prefixes()
 
     found = []
+    if reg_store is None and SYSTEM == "windows":
+        reg_store = registry.default_store()
     try:
         all_installs = installed_games()
     except Exception:
@@ -478,6 +490,16 @@ def detect(db: dict, progress=lambda done, total: None) -> list:
                        ci=True)
             matches += m
             proton = proton or bool(m)
+        reg = [k for k in g.get("r", []) if reg_store is not None and reg_store.exists(k)]
+        if not matches and reg:
+            # salva solo nel registro di Windows
+            found.append(Detected(name=name, folder="", patterns=["*"], steam_id=g.get("s", 0),
+                                  mtime=max(reg_store.mtime(k) for k in reg),
+                                  install_dir=install_dir, store_cloud=store_cloud(db, name),
+                                  registry=reg,
+                                  process=", ".join(x for x, oses in g.get("x", []) if
+                                                    x.lower().endswith(".exe"))))
+            continue
         if not matches:
             continue
         best = max(matches, key=lambda m: m[2])
@@ -493,7 +515,7 @@ def detect(db: dict, progress=lambda done, total: None) -> list:
                               process=", ".join(dict.fromkeys(exes)), steam_id=g.get("s", 0),
                               mtime=best[2], files=_count(folder, patterns),
                               extra_folders=others, install_dir=install_dir,
-                              store_cloud=store_cloud(db, name)))
+                              store_cloud=store_cloud(db, name), registry=reg))
     progress(total, total)
     found.sort(key=lambda d: d.mtime, reverse=True)
     return found

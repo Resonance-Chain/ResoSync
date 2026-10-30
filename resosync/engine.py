@@ -27,6 +27,7 @@ from pathlib import Path
 from .backends import replace_retry
 
 REGISTRY_KEY = "games.json"
+REGISTRY_FILE = ".resosync-registry/registry.json"  # registro di Windows esportato (registry.py)
 LOCK_TTL = 120  # secondi: se un PC si pianta a metà sync, dopo 2 minuti il lock scade
 
 
@@ -103,7 +104,7 @@ def _young(name) -> bool:
 
 
 class SyncEngine:
-    def __init__(self, settings, backend, app_dir: Path, log=print):
+    def __init__(self, settings, backend, app_dir: Path, log=print, registry=None):
         self.settings = settings
         self.backend = backend
         self.app_dir = Path(app_dir)
@@ -112,6 +113,8 @@ class SyncEngine:
         self._hash_cache = {}  # path -> ((size, mtime_ns, ctime_ns), hash)
         self._registered = set()
         self._unreadable = {}  # game_id -> file presenti ma bloccati in questo giro
+        from .registry import RegistrySync
+        self.registry = RegistrySync(self.app_dir, registry, log=lambda m: self.log(m))
         self._keepers = {}  # (game_id, token) -> Event che ferma il rinnovo del lock
         self._scan = None  # durante una sync: i file locali come li ha visti la scansione
         self._base = {}  # durante una sync: la base (com'era ogni file all'ultima sync)
@@ -270,6 +273,8 @@ class SyncEngine:
     def matches(game, rel: str) -> bool:
         # senza distinguere maiuscole: su Windows "*.SAV" prende "slot.sav", e i giochi
         # Windows sotto Proton (Steam Deck) non sono abituati a un sistema che le distingue
+        if getattr(game, "registry", None) and rel == REGISTRY_FILE:
+            return True  # il registro esportato va sempre, qualunque siano i filtri
         rel = rel.lower()
         name = rel.rsplit("/", 1)[-1]
 
@@ -336,59 +341,79 @@ class SyncEngine:
         return out
 
     # ---------- sync ----------
+    def _registry_step(self, game):
+        """Salvataggi nel registro di Windows <-> file esportato nella cartella del gioco."""
+        if not getattr(game, "registry", None):
+            return
+        try:
+            self.registry.reconcile(game)
+        except Exception as e:  # registro non leggibile: la sync dei file va avanti lo stesso
+            self.log(f"[{game.name}] registro di Windows non sincronizzato: {e}")
+
     def sync_game(self, game, wait_lock=0.0) -> dict:
         with self.lock:
-            if not Path(game.path).is_dir() and _volume_missing(game.path):
-                raise FileNotFoundError(f"la cartella di {game.name} è su un disco o una scheda "
-                                        f"SD che adesso non c'è: inseriscila e riprovo")
-            Path(game.path).mkdir(parents=True, exist_ok=True)  # PC nuovo: cartella da creare
-            if self._interrupted(game):
-                # con il lock: le copie potrebbero essere di un'altra sync in corso adesso (il
-                # launcher e l'app sullo stesso PC), non di una interrotta
-                token = self.acquire_lock(game.id, wait_lock)
-                try:
-                    self._recover_interrupted(game)
-                finally:
-                    self.release_lock(game.id, token)
-            self.register_game(game)
-            local = self.scan_local(game)
-            if local and not self._state_file(game.id).exists():
-                # prima sync di questo gioco su questo PC (o su un cloud nuovo): è il momento
-                # in cui ogni differenza diventa un conflitto. Prima una fotografia della
-                # cartella, così si torna indietro con un clic
-                try:
-                    self.snapshot(game, "prima della prima sincronizzazione")
-                except Exception as e:
-                    self.log(f"[{game.name}] istantanea non riuscita: {e}")
-            skip = self._unreadable.get(game.id, set())
-            manifest = self.load_manifest(game.id)
-            if game.mode == "backup":
-                # solo backup: conta solo se è cambiato qualcosa QUI (quello che fanno gli
-                # altri PC sul cloud non tocca la cartella del gioco)
-                base = self._load_state(game.id)["base"]
-                if all(base.get(r) == e["hash"] for r, e in local.items()):
-                    return {"up": 0, "down": 0, "conflicts": 0, "deleted": 0,
-                            "errors": len(skip)}
-            elif not self._differs(local, manifest, skip):
-                # Tutto allineato: niente lock, solo aggiornare la base locale
-                state = self._load_state(game.id)
-                for r in set(state["base"]) - set(local) - skip:
-                    state["base"].pop(r, None)
-                    state["mtimes"].pop(r, None)
-                for r, e in local.items():
-                    if state["base"].get(r) != e["hash"]:
-                        state["mtimes"][r] = e["mtime"]
-                    state["base"][r] = e["hash"]
-                self._save_state(game.id, state)
-                stats = {"up": 0, "down": 0, "conflicts": 0, "deleted": 0, "errors": 0}
-                stats["errors"] = len(skip)
-                return stats
+            if game.registry and not Path(game.path).is_dir() and \
+                    not _volume_missing(game.path):
+                Path(game.path).mkdir(parents=True, exist_ok=True)  # gioco solo-registro
+            if Path(game.path).is_dir():
+                self._registry_step(game)  # il gioco ha salvato nel registro: va nel file
+            try:
+                return self._sync_locked(game, wait_lock)
+            finally:
+                self._registry_step(game)  # arrivato dal cloud: torna nel registro
+
+    def _sync_locked(self, game, wait_lock) -> dict:
+        if not Path(game.path).is_dir() and _volume_missing(game.path):
+            raise FileNotFoundError(f"la cartella di {game.name} è su un disco o una scheda "
+                                    f"SD che adesso non c'è: inseriscila e riprovo")
+        Path(game.path).mkdir(parents=True, exist_ok=True)  # PC nuovo: cartella da creare
+        if self._interrupted(game):
+            # con il lock: le copie potrebbero essere di un'altra sync in corso adesso (il
+            # launcher e l'app sullo stesso PC), non di una interrotta
             token = self.acquire_lock(game.id, wait_lock)
             try:
-                manifest = self.load_manifest(game.id)  # può essere cambiato mentre aspettavamo
-                return self._sync_game(game, local, manifest)
+                self._recover_interrupted(game)
             finally:
                 self.release_lock(game.id, token)
+        self.register_game(game)
+        local = self.scan_local(game)
+        if local and not self._state_file(game.id).exists():
+            # prima sync di questo gioco su questo PC (o su un cloud nuovo): è il momento
+            # in cui ogni differenza diventa un conflitto. Prima una fotografia della
+            # cartella, così si torna indietro con un clic
+            try:
+                self.snapshot(game, "prima della prima sincronizzazione")
+            except Exception as e:
+                self.log(f"[{game.name}] istantanea non riuscita: {e}")
+        skip = self._unreadable.get(game.id, set())
+        manifest = self.load_manifest(game.id)
+        if game.mode == "backup":
+            # solo backup: conta solo se è cambiato qualcosa QUI (quello che fanno gli
+            # altri PC sul cloud non tocca la cartella del gioco)
+            base = self._load_state(game.id)["base"]
+            if all(base.get(r) == e["hash"] for r, e in local.items()):
+                return {"up": 0, "down": 0, "conflicts": 0, "deleted": 0,
+                        "errors": len(skip)}
+        elif not self._differs(local, manifest, skip):
+            # Tutto allineato: niente lock, solo aggiornare la base locale
+            state = self._load_state(game.id)
+            for r in set(state["base"]) - set(local) - skip:
+                state["base"].pop(r, None)
+                state["mtimes"].pop(r, None)
+            for r, e in local.items():
+                if state["base"].get(r) != e["hash"]:
+                    state["mtimes"][r] = e["mtime"]
+                state["base"][r] = e["hash"]
+            self._save_state(game.id, state)
+            stats = {"up": 0, "down": 0, "conflicts": 0, "deleted": 0, "errors": 0}
+            stats["errors"] = len(skip)
+            return stats
+        token = self.acquire_lock(game.id, wait_lock)
+        try:
+            manifest = self.load_manifest(game.id)  # può essere cambiato mentre aspettavamo
+            return self._sync_game(game, local, manifest)
+        finally:
+            self.release_lock(game.id, token)
 
     @staticmethod
     def _differs(local, manifest, skip=frozenset()) -> bool:

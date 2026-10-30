@@ -77,6 +77,7 @@ class Game:
     mode: str = "sync"     # sync = tra i PC | backup = solo copia sul cloud (gioco col suo cloud)
     max_cloud_mb: int = 0  # limite spazio delle versioni sul cloud (0 = nessun limite)
     group_by: str = "none"  # cos'è UN salvataggio: folder (sottocartella) | name | none
+    registry: list = field(default_factory=list)  # chiavi del registro di Windows (HKCU/...)
 
 
 @dataclass
