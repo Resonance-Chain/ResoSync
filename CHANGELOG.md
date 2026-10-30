@@ -2,7 +2,7 @@
 
 (Fino alla 0.4.0 il progetto si chiamava SaveSync.)
 
-## 0.5.6 (in sviluppo)
+## 0.5.6
 
 - **Verifica del cloud, falsi allarmi**: con Proton Drive / OneDrive un salvataggio appena
   caricato da un altro PC può non essere ancora arrivato. La verifica lo dava per rovinato e
