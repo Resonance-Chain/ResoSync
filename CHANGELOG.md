@@ -2,6 +2,12 @@
 
 (Fino alla 0.4.0 il progetto si chiamava SaveSync.)
 
+## 0.5.5 (in sviluppo)
+
+- **Cifratura su un PC nuovo**: se il programma del cloud non aveva ancora scaricato
+  crypto.json, ResoSync ne creava uno nuovo che sovrascriveva quello vero, e tutti i
+  salvataggi sul cloud diventavano illeggibili. Ora aspetta che arrivi.
+
 ## 0.5.4
 
 - **rclone**: nuovo tipo di cloud. Con [rclone](https://rclone.org) ResoSync arriva a più di 70
