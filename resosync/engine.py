@@ -1061,7 +1061,9 @@ class SyncEngine:
         src = Path(game.path, rel)
         folder = self.app_dir / "backups" / game.id / rel
         folder.mkdir(parents=True, exist_ok=True)
-        existing = _by_date(folder.iterdir())
+        # solo i file: una sottocartella è il backup di un altro file (es. "Saves/x" quando
+        # "Saves" era una cartella)
+        existing = _by_date(f for f in folder.iterdir() if f.is_file())
         if existing and existing[-1].stat().st_size == src.stat().st_size and \
                 sha256_file(existing[-1]) == sha256_file(src):
             return  # identico all'ultimo backup
@@ -1069,7 +1071,7 @@ class SyncEngine:
         while dst.exists():
             dst = dst.with_name(dst.name + "_")
         shutil.copy2(src, dst)
-        old = _by_date(folder.iterdir())
+        old = _by_date(f for f in folder.iterdir() if f.is_file())
         for o in old[:-self.settings.max_versions] if self.settings.max_versions > 0 else []:
             o.unlink()
 
@@ -1089,7 +1091,8 @@ class SyncEngine:
         local_dir = self.app_dir / "backups" / game.id / rel
         if local_dir.exists():
             for p in local_dir.iterdir():
-                out.append((p.name, "backup locale", str(p)))
+                if p.is_file():
+                    out.append((p.name, "backup locale", str(p)))
         return sorted(out, key=lambda v: stamp_epoch(Path(v[2]).name) or 0, reverse=True)
 
     # ---------- anteprima di una versione ----------
@@ -1149,7 +1152,8 @@ class SyncEngine:
             for f in (root.iterdir() if root.is_dir() else []):
                 if f.is_dir() and f.name != Path(rel).name:
                     for v in f.iterdir():
-                        candidates.append((f.name, "backup locale", str(v), v.name))
+                        if v.is_file():
+                            candidates.append((f.name, "backup locale", str(v), v.name))
         else:
             prefix = f"{game.id}/blobs/{folder}/" if folder else f"{game.id}/blobs/"
             for key in self.backend.list(prefix):

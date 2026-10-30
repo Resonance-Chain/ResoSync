@@ -206,3 +206,20 @@ def test_service_stop_waits_for_running_sync(tmp_path):
     assert started.wait(5)
     svc.stop()
     assert finished.is_set(), "chiuso a metà sync"
+
+
+# 5. backup locali di "Saves" (file) e di "Saves/x" (file in una cartella con lo stesso nome,
+#    in un altro momento): le cartelle dei backup si sovrappongono
+def test_local_backups_with_file_and_folder_of_same_name(tmp_path):
+    eng = SyncEngine(Settings(device_name="A"), FolderBackend(tmp_path / "cloud"),
+                     tmp_path / "app", log=lambda m: None)
+    g = Game("g", "G", str(tmp_path / "saves"))
+    Path(g.path, "Saves").mkdir(parents=True)
+    Path(g.path, "Saves/x").write_bytes(b"vecchio x")
+    eng._backup_local(g, "Saves/x")
+    Path(g.path, "Saves/x").unlink()
+    Path(g.path, "Saves").rmdir()
+    Path(g.path, "Saves").write_bytes(b"ora e' un file")
+    eng._backup_local(g, "Saves")  # non deve fallire
+    versions = eng.list_versions(g, "Saves")
+    assert [Path(v[2]).read_bytes() for v in versions] == [b"ora e' un file"]
