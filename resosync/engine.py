@@ -92,7 +92,8 @@ def _volume_missing(path) -> bool:
     return False
 
 
-TEMP_SUFFIXES = (".resosync-tmp", ".resosync-old", ".savesync-tmp", ".partial")
+TEMP_SUFFIXES = (".resosync-tmp", ".resosync-old", ".resosync-new", ".savesync-tmp",
+                 ".partial")
 
 
 def _young(name) -> bool:
@@ -248,6 +249,31 @@ class SyncEngine:
         self._hash_cache[key] = (sig, h)
         return h
 
+    @staticmethod
+    def _interrupted(game) -> bool:
+        return any(f.endswith((".resosync-old", ".resosync-new"))
+                   for _, _, files in os.walk(game.path) for f in files)
+
+    def _recover_interrupted(self, game):
+        """Copie .resosync-old rimaste = una sostituzione di un salvataggio da più file è stata
+        interrotta (spegnimento, crash): lo slot può essere mescolato. Rimetto i file com'erano
+        prima, così torna intero e la sync rifà il lavoro da capo."""
+        for dirpath, _, files in os.walk(game.path):
+            for f in files:
+                mark = Path(dirpath, f)
+                if f.endswith(".resosync-old"):
+                    dst = mark.with_name(f[:-len(".resosync-old")])
+                    replace_retry(mark, dst)
+                elif f.endswith(".resosync-new"):  # file arrivato con lo slot interrotto
+                    dst = mark.with_name(f[:-len(".resosync-new")])
+                    dst.unlink(missing_ok=True)
+                    mark.unlink()
+                else:
+                    continue
+                self._hash_cache.pop(str(dst), None)
+                self.log(f"[{game.name}] sostituzione interrotta: rimesso "
+                         f"{dst.relative_to(game.path).as_posix()} com'era")
+
     def scan_local(self, game) -> dict:
         root = Path(game.path)
         out = {}
@@ -276,6 +302,14 @@ class SyncEngine:
                 raise FileNotFoundError(f"la cartella di {game.name} è su un disco o una scheda "
                                         f"SD che adesso non c'è: inseriscila e riprovo")
             Path(game.path).mkdir(parents=True, exist_ok=True)  # PC nuovo: cartella da creare
+            if self._interrupted(game):
+                # con il lock: le copie potrebbero essere di un'altra sync in corso adesso (il
+                # launcher e l'app sullo stesso PC), non di una interrotta
+                token = self.acquire_lock(game.id, wait_lock)
+                try:
+                    self._recover_interrupted(game)
+                finally:
+                    self.release_lock(game.id, token)
             self.register_game(game)
             local = self.scan_local(game)
             skip = self._unreadable.get(game.id, set())
@@ -793,6 +827,10 @@ class SyncEngine:
                 if dst.exists():
                     olds[r] = dst.with_name(dst.name + ".resosync-old")
                     shutil.copy2(dst, olds[r])
+                else:  # file nuovo: se tutto si interrompe va tolto (_recover_interrupted)
+                    olds[r] = dst.with_name(dst.name + ".resosync-new")
+                    dst.parent.mkdir(parents=True, exist_ok=True)
+                    olds[r].touch()
             for r, tmp in fetched:
                 touched.append(r)
                 self._commit(game, r, tmp, remote[r], base, mtimes)
@@ -809,7 +847,7 @@ class SyncEngine:
             for r in reversed(touched):
                 dst = Path(game.path, r)
                 try:
-                    if r in olds:
+                    if r in olds and olds[r].name.endswith(".resosync-old"):
                         replace_retry(olds[r], dst)
                         del olds[r]
                     else:

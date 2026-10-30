@@ -52,3 +52,106 @@ def test_turning_on_encryption_on_plain_cloud_still_works(tmp_path):
     eng.sync_game(g)
     EncryptedBackend(FolderBackend(cloud), PASS)  # nessun errore: si attiva la cifratura
     assert (cloud / "crypto.json").exists()
+
+
+# 2. ResoSync chiuso di colpo (spegnimento, aggiornamento, crash) a metà della sostituzione
+#    di un salvataggio da più file: restano il sav.dat nuovo e il metadata vecchio, più le
+#    copie .resosync-old. Al giro dopo NON deve caricare quello slot mescolato come vincente
+def test_interrupted_group_apply_is_recovered(tmp_path):
+    import json
+    a = SyncEngine(Settings(device_name="A"), FolderBackend(tmp_path / "cloud"),
+                   tmp_path / "app-A", log=lambda m: None)
+    b = SyncEngine(Settings(device_name="B"), FolderBackend(tmp_path / "cloud"),
+                   tmp_path / "app-B", log=lambda m: None)
+    ga = Game("g", "G", str(tmp_path / "A"), group_by="folder")
+    gb = Game("g", "G", str(tmp_path / "B"), group_by="folder")
+    for g, v in ((ga, b"v1"), (gb, None)):
+        Path(g.path, "Slot").mkdir(parents=True)
+    Path(ga.path, "Slot/sav.dat").write_bytes(b"dat v1")
+    Path(ga.path, "Slot/meta.json").write_bytes(b"meta v1")
+    a.sync_game(ga)
+    b.sync_game(gb)
+    Path(ga.path, "Slot/sav.dat").write_bytes(b"dat v2")
+    Path(ga.path, "Slot/meta.json").write_bytes(b"meta v2")
+    a.sync_game(ga)
+    # B stava applicando v2 ed è stato chiuso dopo il primo file: com'è rimasto il disco
+    slot = Path(gb.path, "Slot")
+    for name in ("sav.dat", "meta.json"):
+        (slot / (name + ".resosync-old")).write_bytes((slot / name).read_bytes())
+    m = json.loads((tmp_path / "cloud/g/manifest.json").read_bytes())["files"]
+    (slot / "sav.dat").write_bytes((tmp_path / "cloud" / m["Slot/sav.dat"]["blob"]).read_bytes())
+    b.sync_game(gb)
+    assert ((slot / "sav.dat").read_bytes(), (slot / "meta.json").read_bytes()) == \
+        (b"dat v2", b"meta v2")
+    assert not list(slot.glob("*.resosync-old"))
+    m = json.loads((tmp_path / "cloud/g/manifest.json").read_bytes())["files"]
+    cloud = {r: (tmp_path / "cloud" / e["blob"]).read_bytes() for r, e in m.items()}
+    assert cloud == {"Slot/sav.dat": b"dat v2", "Slot/meta.json": b"meta v2"}
+
+
+def test_interrupted_apply_with_new_file_is_recovered(tmp_path, monkeypatch):
+    """Lo slot vincente ha un file in più (shot.png) che qui non c'era: anche quello va tolto
+    se la sostituzione è stata interrotta, sennò lo slot resta mescolato."""
+    import resosync.engine as em
+    a = SyncEngine(Settings(device_name="A"), FolderBackend(tmp_path / "cloud"),
+                   tmp_path / "app-A", log=lambda m: None)
+    b = SyncEngine(Settings(device_name="B"), FolderBackend(tmp_path / "cloud"),
+                   tmp_path / "app-B", log=lambda m: None)
+    ga = Game("g", "G", str(tmp_path / "A"), group_by="folder")
+    gb = Game("g", "G", str(tmp_path / "B"), group_by="folder")
+    Path(ga.path, "Slot").mkdir(parents=True)
+    Path(ga.path, "Slot/sav.dat").write_bytes(b"dat v1")
+    Path(ga.path, "Slot/meta.json").write_bytes(b"meta v1")
+    a.sync_game(ga)
+    b.sync_game(gb)
+    for name, data in (("sav.dat", b"dat v2"), ("meta.json", b"meta v2"), ("shot.png", b"png")):
+        Path(ga.path, "Slot", name).write_bytes(data)
+    a.sync_game(ga)
+
+    class Killed(BaseException):
+        """ResoSync chiuso di colpo: niente rollback, niente finally."""
+    real_commit, real_unlink = em.SyncEngine._commit, Path.unlink
+    done = []
+
+    def commit_then_die(self, game, rel, tmp, *args, **kw):
+        out = real_commit(self, game, rel, tmp, *args, **kw)
+        done.append(rel)
+        if rel.endswith("shot.png"):  # scritto il file nuovo, poi si spegne tutto
+            monkeypatch.setattr(Path, "unlink", lambda *a, **k: None)  # nessuna pulizia
+            raise Killed()
+        return out
+    monkeypatch.setattr(em.SyncEngine, "_commit", commit_then_die)
+    with pytest.raises(Killed):
+        b.sync_game(gb)
+    monkeypatch.setattr(em.SyncEngine, "_commit", real_commit)
+    monkeypatch.setattr(Path, "unlink", real_unlink)
+    for p in Path(gb.path).rglob("*.resosync-tmp"):
+        p.unlink()
+    (tmp_path / "cloud/g/lock.json").unlink()  # il lock di un PC piantato scade da solo
+    b.sync_game(gb)
+    slot = Path(gb.path, "Slot")
+    got = {p.name: p.read_bytes() for p in slot.iterdir()}
+    assert got == {"sav.dat": b"dat v2", "meta.json": b"meta v2", "shot.png": b"png"}
+    a.sync_game(ga)
+    assert {p.name: p.read_bytes() for p in Path(ga.path, "Slot").iterdir()} == got
+
+
+def test_recovery_waits_for_running_sync(tmp_path):
+    """Le copie .resosync-old di una sync IN CORSO (l'altra istanza ha il lock) non vanno
+    toccate."""
+    from resosync.engine import CloudBusy
+    eng = SyncEngine(Settings(device_name="A"), FolderBackend(tmp_path / "cloud"),
+                     tmp_path / "app", log=lambda m: None)
+    g = Game("g", "G", str(tmp_path / "saves"), group_by="folder")
+    Path(g.path, "Slot").mkdir(parents=True)
+    Path(g.path, "Slot/sav.dat").write_bytes(b"nuovo, in scrittura")
+    Path(g.path, "Slot/sav.dat.resosync-old").write_bytes(b"vecchio")
+    other = SyncEngine(Settings(device_name="launcher"), FolderBackend(tmp_path / "cloud"),
+                       tmp_path / "app", log=lambda m: None)
+    other.register_game(g)
+    token = other.acquire_lock("g")
+    with pytest.raises(CloudBusy):
+        eng.sync_game(g)
+    assert Path(g.path, "Slot/sav.dat").read_bytes() == b"nuovo, in scrittura"
+    other.release_lock("g", token)
+
