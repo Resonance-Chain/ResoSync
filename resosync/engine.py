@@ -115,7 +115,8 @@ class SyncEngine:
         self._unreadable = {}  # game_id -> file presenti ma bloccati in questo giro
         from .registry import RegistrySync
         self.registry = RegistrySync(self.app_dir, registry, log=lambda m: self.log(m))
-        self._keepers = {}  # (game_id, token) -> Event che ferma il rinnovo del lock
+        self._keepers = {}
+        self._said = {}  # game_id -> avvisi già scritti nel log (non ripeterli a ogni giro)  # (game_id, token) -> Event che ferma il rinnovo del lock
         self._scan = None  # durante una sync: i file locali come li ha visti la scansione
         self._base = {}  # durante una sync: la base (com'era ogni file all'ultima sync)
 
@@ -543,6 +544,10 @@ class SyncEngine:
                 max(rels, key=lambda r: remote[r].get("mtime", 0))
             others = sorted(set(rels) - {keep})
             out.update(others)
+            said, key = self._said.setdefault(game.id, set()), tuple(sorted(rels))
+            if key in said:
+                continue  # già detto: non a ogni giro
+            said.add(key)
             self.log(f"[{game.name}] sul cloud ci sono {keep} e {', '.join(others)}, che qui "
                      f"sono lo stesso file (Windows non distingue maiuscole e minuscole): "
                      f"sincronizzo solo {keep}")

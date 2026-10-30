@@ -111,3 +111,21 @@ def test_first_sync_plan_includes_registry(tmp_path):
     plan = engines["Nuovo"].first_sync_plan(gn)
     assert plan is not None
     assert [c["name"] for c in plan["conflicts"]] == [".resosync-registry/registry.json"]
+
+
+# 4. "Slot.sav e slot.sav sono lo stesso file": va detto una volta, non a ogni giro (il servizio
+#    riprova ogni 30 secondi e il log si riempiva della stessa riga)
+@pytest.mark.skipif(__import__("os").name == "nt", reason="su Windows non possono esistere insieme")
+def test_case_collision_logged_once(tmp_path, monkeypatch):
+    deck, gd = pc(tmp_path, "Deck")
+    Path(gd.path, "Slot.sav").write_bytes(b"1")
+    Path(gd.path, "slot.sav").write_bytes(b"2")
+    deck.sync_game(gd)
+    logs = []
+    win = SyncEngine(Settings(device_name="PC"), FolderBackend(tmp_path / "cloud"),
+                     tmp_path / "pc", log=logs.append)
+    monkeypatch.setattr(SyncEngine, "_case_insensitive", staticmethod(lambda path: True))
+    gw = Game("g", "G", str(tmp_path / "pc-saves"))
+    for _ in range(3):
+        win.sync_game(gw)
+    assert sum("maiuscol" in m for m in logs) == 1
