@@ -155,3 +155,25 @@ def test_recovery_waits_for_running_sync(tmp_path):
     assert Path(g.path, "Slot/sav.dat").read_bytes() == b"nuovo, in scrittura"
     other.release_lock("g", token)
 
+
+# 3. una sync lunga (salvataggi grandi, connessione lenta) non deve perdere il lock a metà:
+#    un altro PC entrerebbe mentre sta ancora scrivendo
+def test_lock_is_kept_during_long_sync(tmp_path, monkeypatch):
+    import time
+    import resosync.engine as em
+    from resosync.engine import CloudBusy
+    monkeypatch.setattr(em, "LOCK_TTL", 1.5)
+    a = SyncEngine(Settings(device_name="A"), FolderBackend(tmp_path / "cloud"),
+                   tmp_path / "a", log=lambda m: None)
+    b = SyncEngine(Settings(device_name="B"), FolderBackend(tmp_path / "cloud"),
+                   tmp_path / "b", log=lambda m: None)
+    token = a.acquire_lock("g")
+    try:
+        time.sleep(3.5)  # più del doppio della durata del lock
+        with pytest.raises(CloudBusy):
+            b.acquire_lock("g")
+    finally:
+        a.release_lock("g", token)
+    b.release_lock("g", b.acquire_lock("g"))  # liberato: ora B entra
+    time.sleep(2)  # e il lock di A non torna (il rinnovo si è fermato)
+    b.release_lock("g", b.acquire_lock("g"))

@@ -111,6 +111,7 @@ class SyncEngine:
         self._hash_cache = {}  # path -> ((size, mtime_ns, ctime_ns), hash)
         self._registered = set()
         self._unreadable = {}  # game_id -> file presenti ma bloccati in questo giro
+        self._keepers = {}  # (game_id, token) -> Event che ferma il rinnovo del lock
         self._scan = None  # durante una sync: i file locali come li ha visti la scansione
         self._base = {}  # durante una sync: la base (com'era ogni file all'ultima sync)
 
@@ -176,13 +177,46 @@ class SyncEngine:
                 time.sleep(0.3)
                 cur = self._read_json(key)
                 if cur and cur.get("token") == token:
+                    self._keep_lock(gid, token)
                     return token
             if time.time() >= deadline:
                 who = (cur or {}).get("device", "?")
                 raise CloudBusy(f"{who} sta sincronizzando questo gioco")
             time.sleep(2)
 
+    def _keep_lock(self, gid, token):
+        """Rinnova il lock finché la sync lavora: una sync lunga (salvataggi grandi, rete lenta)
+        non deve vederlo scadere a metà e un altro PC entrare mentre scrive."""
+        key = f"{gid}/lock.json"
+        stop, guard = threading.Event(), threading.Lock()
+        self._keepers[(gid, token)] = (stop, guard)
+
+        def loop():
+            while not stop.wait(LOCK_TTL / 3):
+                try:
+                    with guard:  # mai un rinnovo dopo il rilascio (ricreerebbe il lock)
+                        if stop.is_set():
+                            return
+                        renew()
+                except Exception:
+                    pass  # rete giù per un attimo: riprovo al prossimo giro
+
+        def renew():
+            cur = self._read_json(key)
+            if not cur or cur.get("token") != token:
+                stop.set()  # l'abbiamo perso (es. PC sospeso): non lo riprendo
+                return
+            self.backend.write_bytes(key, json.dumps({
+                "token": token, "device": self.settings.device_name,
+                "expires": time.time() + LOCK_TTL}).encode())
+        threading.Thread(target=loop, daemon=True).start()
+
     def release_lock(self, gid, token):
+        keeper = self._keepers.pop((gid, token), None)
+        if keeper:
+            keeper[0].set()
+            with keeper[1]:
+                pass  # aspetta un rinnovo eventualmente in corso
         key = f"{gid}/lock.json"
         cur = self._read_json(key)
         if cur and cur.get("token") == token:
