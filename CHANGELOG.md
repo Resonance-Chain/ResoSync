@@ -2,6 +2,17 @@
 
 (Fino alla 0.4.0 il progetto si chiamava SaveSync.)
 
+## 0.5.8 (in sviluppo)
+
+- **Ripristina tutto il salvataggio** (slot da più file): un file che in quel salvataggio non
+  era cambiato restava com'era, e con due salvataggi a pochi minuti di distanza (autosave) si
+  prendevano file di quello dopo: lo slot ripristinato era mescolato. Ora i file di uno slot
+  caricati insieme hanno la stessa data e si ritrovano esatti, e per quelli non cambiati si
+  prende la versione in vigore in quel momento. Se una versione è rovinata non si ripristina
+  niente. L'anteprima usa la stessa regola (ora mostra anche lo screenshot non cambiato).
+- **Ripristino di un'istantanea con un file bloccato**: la cartella restava metà di ieri e metà
+  di oggi. Ora torna com'era.
+
 ## 0.5.7
 
 - **Google Drive, PC che non si vedono più**: Drive permette due file con lo stesso nome. Se due

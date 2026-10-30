@@ -4,7 +4,7 @@
 ; installazione (nella sua cartella), senza doppioni nell'elenco dei programmi.
 #define AppVersion GetEnv("RESOSYNC_VERSION")
 #if AppVersion == ""
-  #define AppVersion "0.5.7"
+  #define AppVersion "0.5.8"
 #endif
 
 [Setup]
