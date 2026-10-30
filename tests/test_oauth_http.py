@@ -142,7 +142,12 @@ class FakeDrive:
         if method == "GET" and url == f"{api}/files":
             q = params.get("q", "")
             m = re.match(r"name = '((?:[^'\\]|\\.)*)'", q)
-            items = [{"id": i, "name": f[0]} for i, f in self.files.items()]
+            # come Drive: l'ordine dell'elenco non è garantito (qui: dal più nuovo), solo
+            # orderBy=createdTime lo fissa
+            items = [{"id": i, "name": f[0], "createdTime": f"{int(i[2:]):010d}"}
+                     for i, f in reversed(list(self.files.items()))]
+            if params.get("orderBy") == "createdTime":
+                items.sort(key=lambda x: x["createdTime"])
             if m:
                 want = re.sub(r"\\(.)", r"\1", m.group(1))
                 items = [x for x in items if x["name"] == want]

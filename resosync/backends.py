@@ -262,8 +262,17 @@ class GoogleDriveBackend(_HttpBackend):
         r = self._req("POST", f"{self.UPLOAD}/files?uploadType=resumable",
                       json={"name": key, "parents": ["appDataFolder"]})
         r = self._req("PUT", r.headers["Location"], data=data, auth=False)
-        with self._lock:
-            self._ids[key] = r.json()["id"]
+        mine = r.json()["id"]
+        # Drive permette due file con lo stesso nome: se un altro PC l'ha creato nello stesso
+        # momento, vale il più vecchio per tutti. Il mio doppione si toglie e scrivo in quello
+        # giusto, sennò i due PC userebbero due copie diverse (e il lock sarebbe di tutti e due)
+        oldest = self._find(key, refresh=True)
+        if oldest and oldest != mine:
+            self._req("DELETE", f"{self.API}/files/{mine}", ok=(200, 204, 404))
+            self.write_bytes(key, data)
+        elif not oldest:
+            with self._lock:
+                self._ids[key] = mine
 
     def download_file(self, key, path):
         data = self.read_bytes(key)
@@ -288,16 +297,20 @@ class GoogleDriveBackend(_HttpBackend):
                 self._ids.pop(key, None)
 
     def sizes(self, prefix):
-        out, token = {}, None
+        out, token, seen = {}, None, set()
         while True:
-            params = {"spaces": "appDataFolder", "pageSize": 1000,
-                      "fields": "nextPageToken,files(id,name,size)", "q": "trashed = false"}
+            params = {"spaces": "appDataFolder", "pageSize": 1000, "orderBy": "createdTime",
+                      "fields": "nextPageToken,files(id,name,size,createdTime)",
+                      "q": "trashed = false"}
             if token:
                 params["pageToken"] = token
             r = self._req("GET", f"{self.API}/files", params=params).json()
-            for f in r.get("files", []):
+            for f in r.get("files", []):  # dal più vecchio: per i doppioni vale il primo
+                if f["name"] in seen:
+                    continue
+                seen.add(f["name"])
                 with self._lock:
-                    self._ids.setdefault(f["name"], f["id"])
+                    self._ids[f["name"]] = f["id"]
                 if f["name"].startswith(prefix):
                     out[f["name"]] = int(f.get("size") or 0)
             token = r.get("nextPageToken")
