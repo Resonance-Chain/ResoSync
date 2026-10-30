@@ -391,14 +391,34 @@ def find_rclone(configured=""):
                             "dove si trova nelle impostazioni")
 
 
+RCLONE_FIXED = ["--ask-password=false"]  # senza terminale: chiedere la password = restare appesi
+_RCLONE_PASS_HINT = ("il file di configurazione di rclone è protetto da password: imposta la "
+                     "variabile d'ambiente RCLONE_CONFIG_PASS oppure togli la password con "
+                     "'rclone config'")
+
+
+def _rclone_error(stderr: bytes, fallback) -> str:
+    lines = stderr.decode("utf-8", "replace").strip().splitlines()
+    msg = lines[-1] if lines else str(fallback)
+    if "decrypt configuration" in msg or "ask for password" in msg:
+        return _RCLONE_PASS_HINT
+    return msg
+
+
+def _rclone_run(cmd, data=None, timeout=300):
+    import subprocess
+    kw = {"creationflags": 0x08000000} if os.name == "nt" else {}  # CREATE_NO_WINDOW
+    return subprocess.run(cmd, input=data, stdin=None if data is not None else
+                          subprocess.DEVNULL, capture_output=True, timeout=timeout, **kw)
+
+
 def rclone_remotes(exe="", config=""):
     """I remote configurati in rclone (es. ['proton:', 'gdrive:'])."""
-    import subprocess
-    cmd = [find_rclone(exe), "listremotes"] + (["--config", config] if config else [])
-    kw = {"creationflags": 0x08000000} if os.name == "nt" else {}
-    out = subprocess.run(cmd, capture_output=True, timeout=30, **kw)
+    cmd = [find_rclone(exe), "listremotes", *RCLONE_FIXED] + \
+        (["--config", config] if config else [])
+    out = _rclone_run(cmd, timeout=30)
     if out.returncode:
-        raise RcloneError(out.stderr.decode("utf-8", "replace").strip() or "rclone listremotes")
+        raise RcloneError(_rclone_error(out.stderr, "rclone listremotes"))
     return [r.strip() for r in out.stdout.decode("utf-8", "replace").splitlines() if r.strip()]
 
 
@@ -423,22 +443,18 @@ class RcloneBackend(Backend):
 
     def _run(self, args, data=None, timeout=300, missing_ok=False):
         import subprocess
-        cmd = [self.exe, *args, "--retries", "2", "--low-level-retries", "3"]
+        cmd = [self.exe, *args, "--retries", "2", "--low-level-retries", "3", *RCLONE_FIXED]
         if self.config:
             cmd += ["--config", self.config]
-        kw = {}
-        if os.name == "nt":
-            kw["creationflags"] = 0x08000000  # CREATE_NO_WINDOW: niente finestre nere
         try:
-            p = subprocess.run(cmd, input=data, capture_output=True, timeout=timeout, **kw)
+            p = _rclone_run(cmd, data, timeout)
         except subprocess.TimeoutExpired:
             raise RcloneError(f"rclone non risponde ({args[0]})")
         if p.returncode == 0:
             return p.stdout
         if missing_ok and p.returncode in self.MISSING:
             return None
-        err = p.stderr.decode("utf-8", "replace").strip().splitlines()
-        raise RcloneError(f"rclone {args[0]}: {err[-1] if err else p.returncode}")
+        raise RcloneError(f"rclone {args[0]}: {_rclone_error(p.stderr, p.returncode)}")
 
     def read_bytes(self, key):
         # Solo "non trovato" vale come file assente: un errore di rete NON deve far sembrare

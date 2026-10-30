@@ -181,3 +181,27 @@ def test_config_identity_and_configured(tmp_path):
 def test_list_remotes(remote):
     from resosync.backends import rclone_remotes
     assert rclone_remotes(config=remote[1]) == ["test:"]
+
+
+def test_never_waits_for_a_password_prompt(tmp_path):
+    """Con il rclone.conf cifrato, rclone chiederebbe la password sul terminale: ResoSync gira
+    senza terminale e resterebbe appeso. Deve dirlo subito, non bloccarsi."""
+    args_file = tmp_path / "args"
+    if os.name == "nt":
+        exe = tmp_path / "rclone.bat"
+        exe.write_text(f"@echo %* > \"{args_file}\"\r\n@exit /b 0\r\n")
+    else:
+        exe = tmp_path / "rclone"
+        # se stdin fosse il terminale resterebbe qui ad aspettare
+        exe.write_text(f"#!/bin/sh\necho \"$@\" > '{args_file}'\ncat > /dev/null\nexit 0\n")
+        exe.chmod(exe.stat().st_mode | stat.S_IEXEC)
+    b = RcloneBackend("x:R", exe=str(exe))
+    b.read_bytes("k")
+    assert "--ask-password=false" in args_file.read_text()
+
+
+def test_encrypted_config_error_is_explained(tmp_path):
+    b = RcloneBackend("x:R", exe=fake_rclone(
+        tmp_path, 1, "unable to decrypt configuration and not allowed to ask for password"))
+    with pytest.raises(RcloneError, match="RCLONE_CONFIG_PASS"):
+        b.read_bytes("k")
