@@ -541,6 +541,9 @@ class App(tk.Tk):
             msg = f"{g.name}: {rep['ok']} salvataggi integri sul cloud."
             if rep["repaired"]:
                 msg += f"\n\nRiparati (ricaricati da una copia buona): {', '.join(rep['repaired'])}"
+            if rep["arriving"]:
+                msg += ("\n\nAppena caricati da un altro dispositivo, ancora in arrivo (li "
+                        f"ricontrollo più avanti): {', '.join(rep['arriving'])}")
             if rep["broken"]:
                 msg += "\n\nNON riparabili (nessuna copia uguale da nessuna parte):\n" + \
                     "\n".join(f"• {r}: {why}" for r, why in rep["broken"])

@@ -11,6 +11,14 @@ from resosync.crypto import EncryptedBackend
 from resosync.engine import SyncEngine
 
 
+@pytest.fixture(autouse=True)
+def old_uploads(monkeypatch):
+    """Qui i salvataggi sono caricati "da tempo": quelli appena caricati sono in arrivo e
+    non si giudicano (vedi test_bughunt_056)."""
+    import resosync.engine as em
+    monkeypatch.setattr(em, "GRACE", 0)
+
+
 def setup(tmp_path, encrypt=False):
     s = Settings(device_name="PC", encrypt=encrypt, passphrase="passphrase di prova")
     backend = FolderBackend(tmp_path / "cloud")
@@ -33,7 +41,7 @@ def blob(tmp_path, rel):
 
 def test_all_good(tmp_path):
     eng, g = setup(tmp_path)
-    assert eng.verify_cloud(g) == {"ok": 2, "repaired": [], "broken": []}
+    assert eng.verify_cloud(g) == {"ok": 2, "repaired": [], "broken": [], "arriving": []}
 
 
 def test_corrupt_blob_repaired_from_local_file(tmp_path):

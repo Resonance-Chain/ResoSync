@@ -656,13 +656,26 @@ class SyncEngine:
         """Scarica ogni salvataggio attuale dal cloud e ne controlla l'hash. Se manca o è
         rovinato lo ricarica da una copia con lo stesso contenuto (il file qui, i backup
         locali, le istantanee, un'altra copia sul cloud).
-        {"ok": n, "repaired": [file], "broken": [(file, motivo)]}"""
-        with self.lock:
-            token = self.acquire_lock(game.id, 30)
-            try:
-                report = self._verify(game, repair)
-            finally:
-                self.release_lock(game.id, token)
+        {"ok": n, "repaired": [file], "broken": [(file, motivo)], "arriving": [file]}
+        I controlli si fanno senza lock (con salvataggi grandi durano minuti e la sync non
+        deve aspettare); il lock serve solo per riparare."""
+        report = {"ok": 0, "repaired": [], "broken": [], "arriving": []}
+        todo = []
+        with tempfile.TemporaryDirectory() as td:
+            for rel, e in sorted(self.load_manifest(game.id)["files"].items()):
+                if e.get("deleted"):
+                    continue
+                problem = self._check_blob(game, rel, e, Path(td, "check"))
+                if not problem:
+                    report["ok"] += 1
+                elif _young(e.get("blob") or "") or time.time() - e.get("time", 0) < GRACE:
+                    # appena caricato da un altro dispositivo: con le cartelle cloud può non
+                    # essere ancora arrivato (o essere a metà). Si riguarda la prossima volta
+                    report["arriving"].append(rel)
+                else:
+                    todo.append((rel, e, problem))
+            if todo:
+                self._repair(game, todo, report, repair, Path(td))
         done = self._verified()
         done[game.id] = time.time()
         p = self.app_dir / "verified.json"
@@ -681,41 +694,39 @@ class SyncEngine:
         return days > 0 and self._state_file(game.id).exists() and \
             time.time() - self._verified().get(game.id, 0) >= days * 86400
 
-    def _verify(self, game, repair):
-        report = {"ok": 0, "repaired": [], "broken": []}
-        manifest = self.load_manifest(game.id)
-        changes, rotten = {}, []
-        with tempfile.TemporaryDirectory() as td:
-            for rel, e in sorted(manifest["files"].items()):
-                if e.get("deleted"):
-                    continue
-                problem = self._check_blob(game, rel, e, Path(td, "check"))
-                if not problem:
-                    report["ok"] += 1
-                    continue
-                source = self._find_copy(game, rel, e["hash"], Path(td, "copy")) \
-                    if repair else None
-                if source is None:
-                    report["broken"].append((rel, problem))
-                    self.log(f"[{game.name}] VERIFICA: {rel} sul cloud {problem} e non ne "
-                             f"ho una copia uguale")
-                    continue
-                blob = f"{self._k_blobs(game.id, rel)}{_stamp()}__{self._device_tag()}__" \
-                       f"{e['hash'][:16]}"
-                self.backend.upload_file(blob, source)
-                changes[rel] = dict(e, blob=blob)
-                if e.get("blob") and problem != "manca":
-                    rotten.append(e["blob"])
-                report["repaired"].append(rel)
-                self.log(f"[{game.name}] VERIFICA: {rel} sul cloud {problem}: ricaricato")
-        if changes:
-            self._save_manifest(game.id, changes)
-        for key in rotten:  # la copia rovinata non deve restare tra le versioni
+    def _repair(self, game, todo, report, repair, td):
+        with self.lock:
+            token = self.acquire_lock(game.id, 30)
             try:
-                self.backend.delete(key)
-            except Exception:
-                pass
-        return report
+                current = self.load_manifest(game.id)["files"]
+                changes, rotten = {}, []
+                for rel, e, problem in todo:
+                    if current.get(rel, {}).get("blob") != e.get("blob"):
+                        continue  # cambiato nel frattempo: c'è già una versione nuova
+                    source = self._find_copy(game, rel, e["hash"], td / "copy") \
+                        if repair else None
+                    if source is None:
+                        report["broken"].append((rel, problem))
+                        self.log(f"[{game.name}] VERIFICA: {rel} sul cloud {problem} e non "
+                                 f"ne ho una copia uguale")
+                        continue
+                    blob = f"{self._k_blobs(game.id, rel)}{_stamp()}__{self._device_tag()}__" \
+                           f"{e['hash'][:16]}"
+                    self.backend.upload_file(blob, source)
+                    changes[rel] = dict(e, blob=blob)
+                    report["repaired"].append(rel)
+                    if e.get("blob") and problem != "manca":
+                        rotten.append(e["blob"])
+                    self.log(f"[{game.name}] VERIFICA: {rel} sul cloud {problem}: ricaricato")
+                if changes:
+                    self._save_manifest(game.id, changes)
+                for key in rotten:  # la copia rovinata non deve restare tra le versioni
+                    try:
+                        self.backend.delete(key)
+                    except Exception:
+                        pass
+            finally:
+                self.release_lock(game.id, token)
 
     def _check_blob(self, game, rel, entry, tmp):
         """None se il salvataggio sul cloud è integro, sennò cosa non va."""
