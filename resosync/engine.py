@@ -116,7 +116,8 @@ class SyncEngine:
         from .registry import RegistrySync
         self.registry = RegistrySync(self.app_dir, registry, log=lambda m: self.log(m))
         self._keepers = {}
-        self._said = {}  # game_id -> avvisi già scritti nel log (non ripeterli a ogni giro)  # (game_id, token) -> Event che ferma il rinnovo del lock
+        self._said = {}
+        self._batch_stamp = None  # data comune ai file di un salvataggio caricati insieme  # game_id -> avvisi già scritti nel log (non ripeterli a ogni giro)  # (game_id, token) -> Event che ferma il rinnovo del lock
         self._scan = None  # durante una sync: i file locali come li ha visti la scansione
         self._base = {}  # durante una sync: la base (com'era ogni file all'ultima sync)
 
@@ -501,16 +502,22 @@ class SyncEngine:
         for rels in groups.values():
             if any(r in skip or r in collide for r in rels):
                 continue  # un file del salvataggio è bloccato: decido tutto il gruppo dopo
-            if len(rels) == 1 or game.mode == "backup":
-                for rel in rels:
-                    self._sync_one(rel, **ctx)
-            else:
-                try:
-                    self._sync_group(rels, **ctx)
-                except Exception as e:
-                    stats["errors"] += 1
-                    self.log(f"[{game.name}] errore sul salvataggio "
-                             f"{self.group_key(game, rels[0])}: {e}")
+            # i file dello stesso salvataggio caricati insieme hanno la stessa data nel nome:
+            # "Ripristina tutto il salvataggio" li ritrova esatti (vedi restore_group)
+            self._batch_stamp = _stamp() if len(rels) > 1 else None
+            try:
+                if len(rels) == 1 or game.mode == "backup":
+                    for rel in rels:
+                        self._sync_one(rel, **ctx)
+                else:
+                    try:
+                        self._sync_group(rels, **ctx)
+                    except Exception as e:
+                        stats["errors"] += 1
+                        self.log(f"[{game.name}] errore sul salvataggio "
+                                 f"{self.group_key(game, rels[0])}: {e}")
+            finally:
+                self._batch_stamp = None
 
         if changes:
             self._save_manifest(game.id, changes)
@@ -1170,7 +1177,7 @@ class SyncEngine:
             else:
                 # hash corto nel nome: i percorsi Windows hanno un limite di 260 caratteri
                 # (il contenuto viene comunque verificato con l'hash intero al download)
-                blob = f"{prefix}{_stamp()}__{self._device_tag()}__{h[:16]}"
+                blob = f"{prefix}{self._batch_stamp or _stamp()}__{self._device_tag()}__{h[:16]}"
                 self.backend.upload_file(blob, snap)
                 existing.append(blob)
         # da quali versioni discende questa: quella che avevo, quella che sostituisco sul
@@ -1382,8 +1389,7 @@ class SyncEngine:
             return out
         stamp = Path(ref).name
         folder = rel.rsplit("/", 1)[0] if "/" in rel else ""
-        # versioni dei file vicini, caricate entro 10 minuti da questa
-        candidates = []
+        candidates = []  # versioni dei file vicini
         if origin == "backup locale":
             root = self.app_dir / "backups" / game.id / folder
             for f in (root.iterdir() if root.is_dir() else []):
@@ -1398,12 +1404,16 @@ class SyncEngine:
                 if len(parts) == 2 and parts[0] != Path(rel).name:
                     candidates.append((parts[0], "cloud", key, parts[1]))
 
-        def distance(c):
-            a, b = stamp_epoch(stamp), stamp_epoch(c[3])
-            return abs(a - b) if a is not None and b is not None else float("inf")
-        for name, org, key, _ in sorted(candidates, key=distance):
-            if distance((name, org, key, _)) > 600:
-                break
+        # per ogni file vicino, la sua versione in vigore in quel momento (come il ripristino)
+        by_name = {}
+        for name, org, key, vname in candidates:
+            by_name.setdefault(name, []).append((org, key, vname))
+        chosen = []
+        for name, versions in sorted(by_name.items()):
+            pick = self._version_at(versions, stamp.split("__")[0])
+            if pick:
+                chosen.append((name, pick[0], pick[1]))
+        for name, org, key in chosen:
             if not out["image"] and name.lower().endswith(self.IMAGE_EXT):
                 out["image"], out["image_from"] = self._read_version(org, key), name
             elif not out["info"] and name.lower().endswith(".json"):
@@ -1440,31 +1450,65 @@ class SyncEngine:
 
     def restore_group(self, game, rel, origin, ref) -> list:
         """Rimette TUTTI i file del salvataggio di `rel` com'erano nel momento della versione
-        scelta (es. sav.dat + metadata + screenshot). Ritorna i file ripristinati."""
+        scelta (es. sav.dat + metadata + screenshot). Ritorna i file ripristinati.
+        Tutto o niente: prima si prendono e verificano tutte le versioni, poi si mettono."""
         key = self.group_key(game, rel)
-        stamp = Path(ref).name.split("__")[0]
-
-        secs = stamp_epoch  # i file dello stesso salvataggio: a pochi ms l'uno dall'altro
-        target = secs(stamp)
+        local_origin = origin == "backup locale"
         members = {r for r in set(self.scan_local(game)) | set(self.remote_files(game))
                    if self.group_key(game, r) == key}
         plan = {rel: (origin, ref)}
+        stamp = Path(ref).name.split("__")[0]
         for r in members - {rel}:
-            best = None
-            for _, org, k in self.list_versions(game, r):
-                t = secs(Path(k).name.split("__")[0])
-                if t is None or target is None or (org == "backup locale") != \
-                        (origin == "backup locale"):
-                    continue
-                if abs(t - target) <= 600 and (best is None or abs(t - target) < best[0]):
-                    best = (abs(t - target), org, k)
-            if best:
-                plan[r] = (best[1], best[2])
+            versions = [(org, k, Path(k).name) for _, org, k in self.list_versions(game, r)
+                        if (org == "backup locale") == local_origin]
+            pick = self._version_at(versions, stamp)
+            if pick:
+                plan[r] = pick
         with self.lock:
             self.snapshot(game, f"prima di ripristinare il salvataggio {key}")
-        for r, (org, k) in plan.items():
-            self.restore_version(game, r, org, k, snapshot=False)
+            fetched = []
+            try:
+                for r, (org, k) in sorted(plan.items()):
+                    fetched.append((r, self._fetch_version(game, r, org, k)))
+            except Exception:
+                for _, tmp in fetched:
+                    tmp.unlink(missing_ok=True)
+                raise
+            for r, tmp in fetched:
+                self._commit(game, r, tmp, None, {}, track=False)
+                os.utime(Path(game.path, r), None)  # modifica "nuova": vince alla prossima sync
+            self.log(f"[{game.name}] ripristinato il salvataggio {key} ({len(fetched)} file)")
         return sorted(plan)
+
+    @staticmethod
+    def _version_at(versions, stamp):
+        """Tra [(origine, chiave, nome)] la versione in vigore al momento `stamp`: quella
+        caricata insieme (stessa data nel nome), sennò la più recente non successiva (un file
+        che in quel salvataggio non era cambiato ha la versione di uno precedente, anche ore
+        prima). Un minuto di tolleranza per le versioni caricate prima della 0.5.8, quando
+        ogni file dello slot aveva la sua data. Ritorna (origine, chiave) o None."""
+        target = stamp_epoch(stamp)
+        if target is None:
+            return None
+        best = None
+        for org, key, name in versions:
+            st = name.split("__")[0]
+            if st == stamp:
+                return org, key
+            t = stamp_epoch(st)
+            if t is not None and t <= target + 60 and (best is None or t > best[0]):
+                best = (t, org, key)
+        return (best[1], best[2]) if best else None
+
+    def _fetch_version(self, game, rel, origin, ref) -> Path:
+        """Una versione (cloud o backup locale) in un file temporaneo accanto al salvataggio."""
+        if origin != "backup locale":
+            return self._fetch(game, rel, None, key=ref)
+        dst = Path(game.path, rel)
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        tmp = dst.with_name(dst.name + ".resosync-tmp")
+        shutil.copy2(ref, tmp)
+        return tmp
 
     def restore_version(self, game, rel, origin, ref, snapshot=True) -> None:
         """Rimette una versione vecchia in locale; alla prossima sync parte verso il cloud."""
