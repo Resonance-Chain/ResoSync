@@ -190,3 +190,24 @@ def test_conflict_decided_by_real_registry_time(tmp_path):
     rel = ".resosync-registry/registry.json"
     assert any(b"B, pi" in (tmp_path / "cloud" / v[2]).read_bytes()
                for v in b.list_versions(gb, rel) if v[1].startswith("cloud"))
+
+
+def test_change_with_same_size_and_same_registry_time(tmp_path):
+    """Su Windows: file riscritto con stessa dimensione e stessa data (quella del registro), e
+    NTFS conserva la data di creazione. Per la cache il file sembra lo stesso: la modifica va
+    vista lo stesso."""
+    a, ga, ra = device(tmp_path, "A")
+    ra.set(KEY, "Progress", "1")
+    a.sync_game(ga)
+    p = Path(ga.path, ".resosync-registry/registry.json")
+    old_hash = a._hash_cache[str(p)][1]
+    ra.set(KEY, "Progress", "2")
+    real = a.registry.reconcile
+
+    def reconcile_like_ntfs(game):
+        out = real(game)
+        st = p.stat()  # la firma del file nuovo, ma per la cache è ancora quello vecchio
+        a._hash_cache[str(p)] = ((st.st_size, st.st_mtime_ns, st.st_ctime_ns), old_hash)
+        return out
+    a.registry.reconcile = reconcile_like_ntfs
+    assert a.sync_game(ga)["up"] == 1

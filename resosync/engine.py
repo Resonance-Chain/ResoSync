@@ -346,7 +346,10 @@ class SyncEngine:
         if not getattr(game, "registry", None):
             return
         try:
-            self.registry.reconcile(game)
+            if self.registry.reconcile(game):
+                # file riscritto: la data può essere quella (vecchia) del registro e la
+                # dimensione uguale, quindi la cache degli hash non se ne accorgerebbe
+                self._hash_cache.pop(str(self.registry.file_for(game)), None)
         except Exception as e:  # registro non leggibile: la sync dei file va avanti lo stesso
             self.log(f"[{game.name}] registro di Windows non sincronizzato: {e}")
 

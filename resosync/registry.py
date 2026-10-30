@@ -71,13 +71,24 @@ class WinRegistry:
             return False
 
     def mtime(self, key) -> float:
-        """Ultima modifica della chiave (per ordinare i giochi trovati), in secondi."""
+        """Ultima modifica della chiave o di una sua sottochiave, in secondi (Windows aggiorna
+        solo la chiave che cambia, non quelle sopra)."""
         try:
             with self.w.OpenKey(self.w.HKEY_CURRENT_USER, self._split(key)) as h:
-                ns100 = self.w.QueryInfoKey(h)[2]  # centinaia di ns dal 1601
-            return ns100 / 1e7 - 11644473600
+                return self._mtime(h)
         except OSError:
             return 0.0
+
+    def _mtime(self, h) -> float:
+        n_keys, _, ns100 = self.w.QueryInfoKey(h)  # centinaia di ns dal 1601
+        best = ns100 / 1e7 - 11644473600
+        for i in range(n_keys):
+            try:
+                with self.w.OpenKey(h, self.w.EnumKey(h, i)) as sh:
+                    best = max(best, self._mtime(sh))
+            except OSError:
+                continue
+        return best
 
     def write(self, key, tree):
         with self.w.CreateKey(self.w.HKEY_CURRENT_USER, self._split(key)) as h:
