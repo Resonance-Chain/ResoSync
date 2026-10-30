@@ -205,3 +205,26 @@ def test_encrypted_config_error_is_explained(tmp_path):
         tmp_path, 1, "unable to decrypt configuration and not allowed to ask for password"))
     with pytest.raises(RcloneError, match="RCLONE_CONFIG_PASS"):
         b.read_bytes("k")
+
+
+def test_big_transfers_get_enough_time(tmp_path, monkeypatch):
+    """Un salvataggio da 500 MB su una connessione lenta non deve essere interrotto ogni volta
+    dal timeout pensato per i file piccoli."""
+    import resosync.backends as bk
+    seen = []
+
+    class Done:
+        returncode, stdout, stderr = 0, b"", b""
+    monkeypatch.setattr(bk, "_rclone_run", lambda cmd, data=None, timeout=300:
+                        seen.append((cmd[1], timeout)) or Done())
+    b = RcloneBackend("x:R", exe=fake_rclone(tmp_path, 0))
+    big = tmp_path / "big.sav"
+    with open(big, "wb") as f:
+        f.truncate(500 * 1024 * 1024)
+    b.upload_file("k", big)
+    out = tmp_path / "out"
+    out.write_bytes(b"")
+    monkeypatch.setattr(Path, "is_file", lambda self: True)
+    b.download_file("k", out)
+    assert seen[0][1] >= 500 * 1024 * 1024 / 200_000  # almeno ~200 KB/s
+    assert seen[1][1] >= 3600

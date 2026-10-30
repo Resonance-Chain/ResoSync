@@ -465,19 +465,23 @@ class RcloneBackend(Backend):
         self._run(["rcat", self._r(key)], data=data)
 
     def upload_file(self, key, path):
-        self._run(["copyto", str(path), self._r(key)])
+        # salvataggi grandi su connessioni lente: almeno 5 minuti più ~200 KB/s
+        self._run(["copyto", str(path), self._r(key)],
+                  timeout=300 + Path(path).stat().st_size / 200_000)
 
     def download_file(self, key, path):
         # copyto salta la copia se trova un file con stessa dimensione e data: un temporaneo
         # rimasto da un crash non deve passare per quello giusto
         Path(path).unlink(missing_ok=True)
-        if self._run(["copyto", self._r(key), str(path)], missing_ok=True) is None:
+        if self._run(["copyto", self._r(key), str(path)], timeout=3600,
+                     missing_ok=True) is None:
             raise FileNotFoundError(key)
         if not Path(path).is_file():  # rclone copyto non segnala sempre la sorgente assente
             raise FileNotFoundError(key)
 
     def copy(self, src, dst):
-        if self._run(["copyto", self._r(src), self._r(dst)], missing_ok=True) is None:
+        if self._run(["copyto", self._r(src), self._r(dst)], timeout=3600,
+                     missing_ok=True) is None:
             raise FileNotFoundError(src)
 
     def delete(self, key):
