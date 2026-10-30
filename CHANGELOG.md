@@ -2,7 +2,7 @@
 
 (Fino alla 0.4.0 il progetto si chiamava SaveSync.)
 
-## 0.5.4 (in sviluppo)
+## 0.5.4
 
 - **rclone**: nuovo tipo di cloud. Con [rclone](https://rclone.org) ResoSync arriva a più di 70
   servizi, **Proton Drive compreso, anche sullo Steam Deck**: il Deck può usare direttamente la
