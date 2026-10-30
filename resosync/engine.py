@@ -72,6 +72,26 @@ def _by_date(names):
 # che vediamo (le cartelle cloud consegnano i file in ritardo): per un po' non si cancella.
 GRACE = 2 * 3600
 ANCESTRY = 20  # quante versioni precedenti ricorda ogni caricamento (hash corti)
+# Dove Linux monta dischi e schede SD (Steam Deck: /run/media/deck/<scheda>)
+REMOVABLE_ROOTS = ("/run/media", "/media", "/mnt")
+
+
+def _volume_missing(path) -> bool:
+    """La cartella sta su un disco rimovibile che adesso non c'è? Su Windows una lettera di
+    unità assente fa già fallire la creazione; su Linux no, e la cartella finirebbe sul
+    disco interno (o in RAM) al posto della scheda."""
+    p = os.path.abspath(str(path))
+    for root in REMOVABLE_ROOTS:
+        root = os.path.abspath(root)
+        if p.startswith(root + os.sep):
+            parts = p[len(root) + 1:].split(os.sep)
+            # /run/media/<utente>/<scheda>, /media/<utente>/<scheda>, /mnt/<scheda>
+            depth = 1 if os.path.basename(root) == "mnt" else 2
+            mount = os.path.join(root, *parts[:depth])
+            return len(parts) > depth and not os.path.isdir(mount)
+    return False
+
+
 TEMP_SUFFIXES = (".resosync-tmp", ".resosync-old", ".savesync-tmp", ".partial")
 
 
@@ -252,6 +272,9 @@ class SyncEngine:
     # ---------- sync ----------
     def sync_game(self, game, wait_lock=0.0) -> dict:
         with self.lock:
+            if not Path(game.path).is_dir() and _volume_missing(game.path):
+                raise FileNotFoundError(f"la cartella di {game.name} è su un disco o una scheda "
+                                        f"SD che adesso non c'è: inseriscila e riprovo")
             Path(game.path).mkdir(parents=True, exist_ok=True)  # PC nuovo: cartella da creare
             self.register_game(game)
             local = self.scan_local(game)

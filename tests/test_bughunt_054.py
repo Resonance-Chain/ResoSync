@@ -164,3 +164,31 @@ def test_restore_refused_while_game_open(monkeypatch, action):
                                 _rel=lambda: "s.sav", destroy=lambda: None)
     getattr(gui.RestoreDialog, action)(dlg)
     assert warned and not restored
+
+
+def test_sd_card_removed_folder_not_recreated(tmp_path, monkeypatch):
+    """Steam Deck: gioco installato sulla microSD (salvataggi Proton sulla scheda). Tolta la
+    scheda, ResoSync non deve ricreare la cartella sotto /run/media (finirebbe in RAM e la
+    scheda, reinserita, non si monterebbe più lì)."""
+    import resosync.engine as em
+    from pathlib import Path
+    from resosync.backends import FolderBackend
+    from resosync.config import Game, Settings
+    from resosync.engine import SyncEngine
+    media = tmp_path / "run/media/deck"
+    media.mkdir(parents=True)
+    monkeypatch.setattr(em, "REMOVABLE_ROOTS", (str(tmp_path / "run/media"),))
+    eng = SyncEngine(Settings(), FolderBackend(tmp_path / "cloud"), tmp_path / "app",
+                     log=lambda m: None)
+    sd_game = Game("g", "G", str(media / "SD64/steamapps/compatdata/1/pfx/saves"))
+    with pytest.raises(OSError, match="scheda"):
+        eng.sync_game(sd_game)
+    assert not (media / "SD64").exists()
+    # scheda inserita: la cartella del gioco si crea normalmente
+    (media / "SD64").mkdir()
+    eng.sync_game(sd_game)
+    assert Path(sd_game.path).is_dir()
+    # fuori dai dischi rimovibili tutto come prima (PC nuovo: cartella da creare)
+    new_pc = Game("h", "H", str(tmp_path / "home/AppData/Roaming/Gioco"))
+    eng.sync_game(new_pc)
+    assert Path(new_pc.path).is_dir()
