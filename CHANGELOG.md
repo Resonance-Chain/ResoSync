@@ -2,6 +2,13 @@
 
 (Fino alla 0.4.0 il progetto si chiamava SaveSync.)
 
+## 0.5.9 (in sviluppo)
+
+- **Filtri dei file**: escludendo dei file da un gioco (es. `*.bak`), quelli già sincronizzati
+  contavano come cancellati e con "propaga cancellazioni" sparivano dagli altri PC. E con filtri
+  diversi su due PC, quello coi filtri più stretti riscaricava i file dell'altro a ogni giro (o
+  li cancellava dal cloud). Ora i file fuori dai filtri di un PC, per quel PC, non esistono.
+
 ## 0.5.8
 
 - **Ripristina tutto il salvataggio** (slot da più file): un file che in quel salvataggio non
