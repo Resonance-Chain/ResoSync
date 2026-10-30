@@ -90,3 +90,24 @@ def test_verify_does_not_block_game_detection(tmp_path, monkeypatch):
     finally:
         procs.clear()
         svc.stop(wait=10)
+
+
+# 3. anteprima della prima sync per un gioco che salva nel registro: il conflitto sul registro
+#    (giocato su tutti e due i PC prima di ResoSync) deve comparire nell'anteprima
+def test_first_sync_plan_includes_registry(tmp_path):
+    from test_registry import KEY, FakeRegistry
+    regs = {}
+    engines = {}
+    for name in ("PC", "Nuovo"):
+        regs[name] = FakeRegistry()
+        engines[name] = SyncEngine(Settings(device_name=name), FolderBackend(tmp_path / "cloud"),
+                                   tmp_path / f"app-{name}", log=lambda m: None,
+                                   registry=regs[name])
+    regs["PC"].set(KEY, "Progress", "dal PC")
+    gp = Game("g", "G", str(tmp_path / "pc"), registry=[KEY])
+    engines["PC"].sync_game(gp)
+    regs["Nuovo"].set(KEY, "Progress", "dal PC nuovo")
+    gn = Game("g", "G", str(tmp_path / "nuovo"), registry=[KEY])
+    plan = engines["Nuovo"].first_sync_plan(gn)
+    assert plan is not None
+    assert [c["name"] for c in plan["conflicts"]] == [".resosync-registry/registry.json"]

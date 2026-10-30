@@ -776,6 +776,11 @@ class SyncEngine:
         "remote_time", "device"}]}: stesse regole della sync vera (vince il più recente)."""
         if game.mode == "backup" or self._state_file(game.id).exists():
             return None
+        if game.registry and not _volume_missing(game.path):
+            # il registro va nel file prima di confrontare, come fa la sync
+            Path(game.path).mkdir(parents=True, exist_ok=True)
+            with self.lock:
+                self._registry_step(game)
         local = self.scan_local(game) if Path(game.path).is_dir() else {}
         remote = {r: e for r, e in self.load_manifest(game.id)["files"].items()
                   if not e.get("deleted")}
