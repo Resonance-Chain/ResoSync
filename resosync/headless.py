@@ -55,6 +55,11 @@ def run(stop_event=None) -> int:
             log.info(f"[{args[0]}] {args[1]}")
         elif kind == "notify":
             log.warning(f"{args[0]}: {args[1]}")
+        elif kind == "confirm_first":
+            game = cfg.get_game(args[0])
+            log.warning(f"[{game.name if game else args[0]}] prima sincronizzazione con "
+                        f"salvataggi diversi qui e sul cloud: apri ResoSync (modalità desktop) "
+                        f"per vedere cosa succede e confermare")
 
     def connect():
         """Backend + motore + servizio; riprova finché il cloud non risponde."""

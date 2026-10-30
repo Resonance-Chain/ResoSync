@@ -277,3 +277,28 @@ class SnapshotDialog(tk.Toplevel):
             self._fill()
             messagebox.showinfo("ResoSync", f"Fatto: {n} file rimessi.", parent=self)
         run_bg(self, work, done)
+
+
+def first_sync_text(game_name, plan) -> str:
+    """Il piano della prima sincronizzazione, in parole (finestra e launcher)."""
+    lines = [f"Prima sincronizzazione di {game_name} su questo PC: alcuni salvataggi sono "
+             "diversi qui e sul cloud. Per ognuno vince il più recente:", ""]
+    for c in plan["conflicts"][:12]:
+        if c["winner"] == "local":
+            lines.append(f"• {c['name']}: tengo quello di QUESTO PC ({fmt_time(c['local_time'])})"
+                         f", quello del cloud va nelle versioni")
+        else:
+            lines.append(f"• {c['name']}: tengo quello del CLOUD ({c['device']}, "
+                         f"{fmt_time(c['remote_time'])}), quello di qui va nei backup")
+    if len(plan["conflicts"]) > 12:
+        lines.append(f"• … e altri {len(plan['conflicts']) - 12}")
+    extra = []
+    if plan["down"]:
+        extra.append(f"{len(plan['down'])} da scaricare")
+    if plan["up"]:
+        extra.append(f"{len(plan['up'])} da caricare")
+    if extra:
+        lines += ["", "Inoltre: " + ", ".join(extra) + " (nessun conflitto)."]
+    lines += ["", "Prima faccio un'istantanea della cartella, così puoi tornare indietro.",
+              "Procedo?"]
+    return "\n".join(lines)

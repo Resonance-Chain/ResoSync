@@ -149,6 +149,8 @@ class SyncService:
         self._pending = {}         # game_id -> istante in cui far partire la sync
         self._forced = set()       # sync da fare anche con la sincronizzazione automatica spenta
         self._allow_playing = set()  # sync da fare anche se il gioco è aperto
+        self._first_ok = set()     # prima sync confermata (vedi SyncEngine.first_sync_plan)
+        self._first_asked = set()  # conferma già chiesta: non la richiedo a ogni giro
         self._playing = {}         # game_id -> True se il processo del gioco è attivo
         self._heartbeat = {}       # game_id -> ultimo aggiornamento di "sto giocando"
         self._lock = threading.Lock()
@@ -197,8 +199,16 @@ class SyncService:
             for gid in ids:
                 self._pending[gid] = time.time() + delay
                 self._forced.add(gid)
+                if delay == 0 and not while_playing:
+                    self._first_asked.discard(gid)  # chiesta a mano: si può richiedere conferma
                 if while_playing:
                     self._allow_playing.add(gid)
+
+    def confirm_first_sync(self, game_id):
+        """L'utente ha visto il piano della prima sync e dice di procedere."""
+        with self._lock:
+            self._first_ok.add(game_id)
+        self.request_sync(game_id)
 
     def rewatch(self):
         self._watch()
@@ -342,6 +352,19 @@ class SyncService:
         game = self.config.get_game(gid)
         if not game:
             return
+        if gid not in self._first_ok:
+            try:
+                plan = self.engine.first_sync_plan(game)
+            except Exception:
+                plan = None  # cloud irraggiungibile: ci pensa la sync a dirlo
+            if plan:
+                # prima sync con dei conflitti: niente in automatico, decide l'utente
+                self.on_event("status", gid, "Prima sincronizzazione: da confermare")
+                if gid not in self._first_asked:
+                    self._first_asked.add(gid)
+                    self.on_event("confirm_first", gid, plan)
+                return
+            self._first_ok.add(gid)
         self.on_event("status", gid, "Sincronizzazione…")
         try:
             st = self.engine.sync_game(game)

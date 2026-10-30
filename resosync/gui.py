@@ -244,6 +244,8 @@ class App(tk.Tk):
                     if args[0]:
                         self.cfg.save()
                         self._refresh()
+                elif kind == "confirm_first":
+                    self._confirm_first(*args)
                 elif kind == "show":
                     self._show()
                 elif kind == "sync_all":
@@ -254,6 +256,19 @@ class App(tk.Tk):
         except queue.Empty:
             pass
         self.after(150, self._process_events)
+
+    def _confirm_first(self, gid, plan):
+        from .dialogs import first_sync_text
+        game = self.cfg.get_game(gid)
+        if not game or not self.service:
+            return
+        self._show()
+        if messagebox.askyesno("Prima sincronizzazione", first_sync_text(game.name, plan),
+                               parent=self):
+            self.service.confirm_first_sync(gid)
+        else:
+            self._log(f"[{game.name}] prima sincronizzazione rimandata: premi Sincronizza "
+                      "quando vuoi")
 
     def _log(self, msg):
         self.logbox.configure(state="normal")

@@ -352,6 +352,14 @@ class SyncEngine:
                     self.release_lock(game.id, token)
             self.register_game(game)
             local = self.scan_local(game)
+            if local and not self._state_file(game.id).exists():
+                # prima sync di questo gioco su questo PC (o su un cloud nuovo): è il momento
+                # in cui ogni differenza diventa un conflitto. Prima una fotografia della
+                # cartella, così si torna indietro con un clic
+                try:
+                    self.snapshot(game, "prima della prima sincronizzazione")
+                except Exception as e:
+                    self.log(f"[{game.name}] istantanea non riuscita: {e}")
             skip = self._unreadable.get(game.id, set())
             manifest = self.load_manifest(game.id)
             if game.mode == "backup":
@@ -614,6 +622,41 @@ class SyncEngine:
                 self.backend.delete(key)
                 freed += size
         return freed
+
+    # ---------- prima sincronizzazione ----------
+    def first_sync_plan(self, game):
+        """Prima sync di un gioco su questo PC (o su un cloud nuovo): cosa succederebbe, senza
+        toccare niente. None se non c'è niente di rischioso (solo file nuovi da una parte o
+        dall'altra) o se il gioco è già stato sincronizzato qui.
+        {"down": [...], "up": [...], "conflicts": [{"name", "winner", "local_time",
+        "remote_time", "device"}]}: stesse regole della sync vera (vince il più recente)."""
+        if game.mode == "backup" or self._state_file(game.id).exists():
+            return None
+        local = self.scan_local(game) if Path(game.path).is_dir() else {}
+        remote = {r: e for r, e in self.load_manifest(game.id)["files"].items()
+                  if not e.get("deleted")}
+        groups = {}
+        for rel in sorted(set(local) | set(remote)):
+            groups.setdefault(self.group_key(game, rel), []).append(rel)
+        plan = {"down": [], "up": [], "conflicts": []}
+        for key, rels in groups.items():
+            L = {r: local[r]["hash"] for r in rels if r in local}
+            R = {r: remote[r]["hash"] for r in rels if r in remote}
+            if L == R:
+                continue
+            if not L:
+                plan["down"].append(key)
+            elif not R:
+                plan["up"].append(key)
+            else:
+                l_time = max(local[r]["mtime"] for r in L)
+                r_time = max(remote[r].get("mtime", 0) for r in R)
+                newest = max(R, key=lambda r: remote[r].get("mtime", 0))
+                plan["conflicts"].append({
+                    "name": key, "winner": "local" if l_time >= r_time else "cloud",
+                    "local_time": l_time, "remote_time": r_time,
+                    "device": remote[newest].get("device", "?")})
+        return plan if plan["conflicts"] else None
 
     # ---------- istantanee ----------
     def snapshot(self, game, reason: str):

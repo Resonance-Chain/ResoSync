@@ -140,7 +140,10 @@ def test_service_snapshot_and_warning_on_game_start(tmp_path, monkeypatch):
     finally:
         svc.stop()
     assert any(e[0] == "notify" and "Steam Deck" in e[1] for e in events)
-    assert SnapshotStore(cfg.app_dir, "g").list()[0]["reason"] == "avvio del gioco"
+    # la cartella è fotografata prima di giocare (se è identica all'istantanea della prima
+    # sincronizzazione, quella dell'avvio non si duplica)
+    assert {x["reason"] for x in SnapshotStore(cfg.app_dir, "g").list()} & {
+        "avvio del gioco", "prima della prima sincronizzazione"}
     assert other.others_playing(og) == []  # chiudendo il servizio la presenza sparisce
 
 

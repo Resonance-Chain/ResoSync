@@ -14,6 +14,7 @@ from tkinter import messagebox, ttk
 
 from .backends import make_backend
 from .config import Config, process_names
+from .dialogs import first_sync_text
 from .engine import SyncEngine
 from .service import is_game_running, running_processes
 
@@ -207,11 +208,30 @@ def run(game_ref: str, command: list, quiet: bool = False) -> int:
 
     holder = {}
 
-    def sync(wait):
+    def engine():
         if "engine" not in holder:
             holder["engine"] = SyncEngine(cfg.settings, make_backend(cfg.settings, cfg.vault),
                                           cfg.app_dir, log=log)
-        return holder["engine"].sync_game(game, wait_lock=wait)
+        return holder["engine"]
+
+    def sync(wait):
+        return engine().sync_game(game, wait_lock=wait)
+
+    if not quiet:
+        # prima sync con dei conflitti: si mostra cosa succede (senza finestre si procede,
+        # tanto prima c'è l'istantanea della cartella)
+        plan, _ = ui.run(lambda: engine().first_sync_plan(game))
+        if plan and not ui.ask(first_sync_text(game.name, plan)):
+            log(f"[{game.name}] prima sincronizzazione rimandata: avvio senza sincronizzare")
+            ui.close()
+            try:
+                proc = _start_game(game, command)
+            except OSError as e:
+                ui.warn(f"Impossibile avviare il gioco:\n{e}")
+                return 1
+            if proc is not None:
+                proc.wait()
+            return proc.returncode if proc is not None and proc.returncode is not None else 0
 
     ui.say(f"Scarico i salvataggi di {game.name}…")
     stats, err = ui.run(lambda: sync(60))
