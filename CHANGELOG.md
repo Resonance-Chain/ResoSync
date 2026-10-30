@@ -4,6 +4,22 @@
 
 ## 0.5.5 (in sviluppo)
 
+Novità per la sicurezza dei salvataggi:
+
+- **Salvataggi nel registro di Windows**: i giochi che salvano lì (alcuni giochi Unity, molti
+  giochi vecchi) ora vengono trovati da *Rileva giochi* e sincronizzati. Le chiavi vengono
+  esportate in un file nella cartella del gioco, con versioni, conflitti e istantanee come gli
+  altri salvataggi; quando arriva dal cloud o lo ripristini, torna nel registro. Un PC su cui
+  il gioco non è mai stato aperto non sovrascrive mai il salvataggio degli altri.
+- **Verifica del cloud**: ogni settimana (impostabile) ResoSync controlla che ogni salvataggio
+  sul cloud ci sia e sia integro. Se uno è rovinato lo ricarica da una copia buona (il file qui,
+  i backup, le istantanee); se non c'è nessuna copia ti avvisa. Anche a mano dal menu del gioco.
+- **Anteprima della prima sincronizzazione**: su un PC nuovo (o un cloud nuovo), se ci sono
+  salvataggi diversi qui e sul cloud, ResoSync non decide da solo: mostra quale versione
+  terrebbe per ognuno e chiede conferma. Prima fa sempre un'istantanea della cartella.
+
+Bug sistemati:
+
 - **Cifratura su un PC nuovo**: se il programma del cloud non aveva ancora scaricato
   crypto.json, ResoSync ne creava uno nuovo che sovrascriveva quello vero, e tutti i
   salvataggi sul cloud diventavano illeggibili. Ora aspetta che arrivi.

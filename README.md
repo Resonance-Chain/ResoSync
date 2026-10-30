@@ -82,8 +82,16 @@ dalla lista di quelli aperti.
 
 ## Funzioni extra
 
-- **Istantanee** della cartella salvataggi a ogni avvio del gioco (deduplicate, ripristino con
-  un clic).
+- **Istantanee** della cartella salvataggi a ogni avvio del gioco e prima della prima
+  sincronizzazione (deduplicate, ripristino con un clic).
+- **Salvataggi nel registro di Windows** (alcuni giochi Unity e molti giochi vecchi): le chiavi
+  del database di Ludusavi vengono esportate in `.resosync-registry/registry.json` nella cartella
+  del gioco e viaggiano come gli altri salvataggi. Sullo Steam Deck il file resta come copia (il
+  registro dei giochi Proton per ora non viene toccato).
+- **Verifica del cloud** ogni settimana (o dal menu del gioco): controlla che ogni salvataggio
+  sul cloud sia integro e lo ripara da una copia buona, se c'è.
+- **Anteprima della prima sincronizzazione**: su un PC nuovo, se ci sono salvataggi diversi qui
+  e sul cloud, ResoSync mostra cosa terrebbe e chiede conferma.
 - **Avviso** se lo stesso gioco è aperto su un altro PC.
 - **Solo backup** per i giochi che hanno già il cloud dello store.
 - **Dettagli** per gioco: spazio, cronologia, ultimo salvataggio.
