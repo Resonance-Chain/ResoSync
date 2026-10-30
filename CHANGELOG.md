@@ -15,6 +15,14 @@
   vecchio dopo che l'avevi cambiato. Ora si ricollega a quello nuovo.
 - **Impostazioni**: scegliendo un cloud senza completarlo, la finestra cancellava comunque lo
   stato delle sincronizzazioni. Ora non cambia niente finché la configurazione non è completa.
+- **Steam Deck, giochi sulla microSD**: togliendo la scheda, ResoSync ricreava la cartella dei
+  salvataggi in memoria e ci riscaricava tutto, e la scheda reinserita non si montava più al
+  suo posto. Ora aspetta che la scheda torni.
+- **Ripristina versione con il gioco aperto**: il gioco sovrascriveva la versione ripristinata
+  al primo salvataggio automatico. Ora chiede di chiuderlo prima, come per le istantanee.
+- **rclone**: con il file di configurazione protetto da password restava appeso fino al
+  timeout (ora lo spiega subito), e i salvataggi grandi su connessioni lente venivano
+  interrotti ogni volta (ora il tempo cresce con la dimensione).
 
 ## 0.5.3
 
