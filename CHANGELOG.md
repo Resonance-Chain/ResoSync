@@ -2,7 +2,7 @@
 
 (Fino alla 0.4.0 il progetto si chiamava SaveSync.)
 
-## 0.5.8 (in sviluppo)
+## 0.5.8
 
 - **Ripristina tutto il salvataggio** (slot da più file): un file che in quel salvataggio non
   era cambiato restava com'era, e con due salvataggi a pochi minuti di distanza (autosave) si
