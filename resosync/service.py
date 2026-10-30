@@ -152,6 +152,7 @@ class SyncService:
         self._allow_playing = set()  # sync da fare anche se il gioco è aperto
         self._first_ok = set()     # prima sync confermata (vedi SyncEngine.first_sync_plan)
         self._first_asked = set()  # conferma già chiesta: non la richiedo a ogni giro
+        self._verifier = None      # thread della verifica periodica del cloud
         self._playing = {}         # game_id -> True se il processo del gioco è attivo
         self._heartbeat = {}       # game_id -> ultimo aggiornamento di "sto giocando"
         self._lock = threading.Lock()
@@ -333,9 +334,13 @@ class SyncService:
         if now - last["proc"] >= 3:
             last["proc"] = now
             self._check_processes()
-        if now - last["verify"] >= VERIFY_EVERY:
+        if now - last["verify"] >= VERIFY_EVERY and not (
+                self._verifier and self._verifier.is_alive()):
             last["verify"] = now
-            self._verify_one()
+            # in un thread a parte: con salvataggi grandi dura minuti, e intanto il servizio
+            # deve continuare ad accorgersi dei giochi che si aprono
+            self._verifier = threading.Thread(target=self._verify_one, daemon=True)
+            self._verifier.start()
 
         with self._lock:
             due = [gid for gid, t in self._pending.items()
@@ -355,7 +360,9 @@ class SyncService:
     def _verify_one(self):
         """Verifica periodica del cloud: un gioco per volta, mai mentre ci giochi."""
         days = self.config.settings.verify_days
-        for g in self.config.games:
+        for g in list(self.config.games):
+            if self._stop.is_set():
+                return
             if not g.enabled or self.is_playing(g.id) or not self.engine.verify_due(g, days):
                 continue
             try:
@@ -364,7 +371,9 @@ class SyncService:
                 self.on_event("log", f"[{g.name}] verifica del cloud non riuscita: {e}")
                 return
             self.on_event("log", f"[{g.name}] verifica del cloud: {rep['ok']} integri, "
-                                 f"{len(rep['repaired'])} riparati, {len(rep['broken'])} rovinati")
+                                 f"{len(rep['repaired'])} riparati, {len(rep['broken'])} rovinati"
+                                 + (f", {len(rep['arriving'])} ancora in arrivo"
+                                    if rep["arriving"] else ""))
             if rep["broken"]:
                 self.on_event("notify", f"{g.name}: salvataggi rovinati sul cloud",
                               ", ".join(r for r, _ in rep["broken"]) + ": nessuna copia buona "

@@ -55,3 +55,38 @@ def test_verify_old_broken_blob_still_reported(tmp_path, monkeypatch):
     monkeypatch.setattr(em, "GRACE", 0)  # caricato da più di 2 ore
     assert [r for r, _ in a.verify_cloud(ga)["broken"]] == ["s.sav"]
 
+
+# 2. la verifica (lunga con salvataggi grandi) non deve bloccare il servizio: intanto deve
+#    accorgersi che apri un gioco
+def test_verify_does_not_block_game_detection(tmp_path, monkeypatch):
+    procs = []
+    monkeypatch.setattr(service, "running_processes", lambda with_paths=True: list(procs))
+    monkeypatch.setattr(service, "VERIFY_EVERY", 0.3)
+    eng, g = pc(tmp_path, "A")
+    g.process = "game.exe"
+    Path(g.path, "s.sav").write_bytes(b"x")
+    eng.sync_game(g)
+    cfg = Config(app_dir=eng.app_dir)
+    cfg.settings = eng.settings
+    cfg.games.append(g)
+    slow = threading.Event()
+    real = eng.backend.download_file
+
+    def slow_download(key, path):
+        slow.set()
+        time.sleep(6)  # salvataggio da qualche GB
+        return real(key, path)
+    monkeypatch.setattr(eng.backend, "download_file", slow_download)
+    events = []
+    svc = service.SyncService(cfg, eng, lambda *a: events.append(a))
+    svc.start()
+    try:
+        assert slow.wait(5), "la verifica non è partita"
+        procs.append(("game", ""))
+        end = time.time() + 4
+        while time.time() < end and not svc.is_playing("g"):
+            time.sleep(0.1)
+        assert svc.is_playing("g"), "durante la verifica non si accorge del gioco aperto"
+    finally:
+        procs.clear()
+        svc.stop(wait=10)
