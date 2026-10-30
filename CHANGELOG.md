@@ -2,7 +2,7 @@
 
 (Fino alla 0.4.0 il progetto si chiamava SaveSync.)
 
-## 0.5.5 (in sviluppo)
+## 0.5.5
 
 Novità per la sicurezza dei salvataggi:
 
