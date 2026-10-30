@@ -2,6 +2,18 @@
 
 (Fino alla 0.4.0 il progetto si chiamava SaveSync.)
 
+## 0.5.6 (in sviluppo)
+
+- **Verifica del cloud, falsi allarmi**: con Proton Drive / OneDrive un salvataggio appena
+  caricato da un altro PC può non essere ancora arrivato. La verifica lo dava per rovinato e
+  mandava l'avviso; ora è "in arrivo" e si ricontrolla dopo.
+- **Verifica del cloud, servizio bloccato**: con salvataggi grandi la verifica durava minuti e
+  in quel tempo ResoSync non si accorgeva dei giochi aperti (niente download prima di giocare,
+  niente protezione durante la partita). Ora gira a parte e la sync non la aspetta.
+- **Anteprima della prima sync e registro**: per i giochi che salvano nel registro di Windows
+  il conflitto non compariva nell'anteprima e veniva deciso senza chiedere.
+- **Log**: l'avviso sui file che differiscono solo per le maiuscole si ripeteva ogni 30 secondi.
+
 ## 0.5.5
 
 Novità per la sicurezza dei salvataggi:
