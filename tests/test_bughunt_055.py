@@ -223,3 +223,25 @@ def test_local_backups_with_file_and_folder_of_same_name(tmp_path):
     eng._backup_local(g, "Saves")  # non deve fallire
     versions = eng.list_versions(g, "Saves")
     assert [Path(v[2]).read_bytes() for v in versions] == [b"ora e' un file"]
+
+
+def test_cloud_versions_of_file_and_folder_of_same_name(tmp_path, monkeypatch):
+    """Sul cloud le versioni di "Saves" (blobs/Saves/) contengono la cartella delle versioni di
+    "Saves/x" (blobs/Saves/x/): la pulizia di "Saves" non deve cancellare quelle di "Saves/x"."""
+    import resosync.engine as em
+    monkeypatch.setattr(em, "GRACE", 0)
+    eng = SyncEngine(Settings(device_name="A", max_versions=1), FolderBackend(tmp_path / "cloud"),
+                     tmp_path / "app", log=lambda m: None)
+    g = Game("g", "G", str(tmp_path / "saves"))
+    Path(g.path, "Saves").mkdir(parents=True)
+    for i in range(3):
+        Path(g.path, "Saves/x").write_bytes(b"x%d" % i)
+        eng.sync_game(g)
+    x_blobs = sorted((tmp_path / "cloud/g/blobs/Saves/x").iterdir())
+    Path(g.path, "Saves/x").unlink()
+    Path(g.path, "Saves").rmdir()
+    for i in range(3):
+        Path(g.path, "Saves").write_bytes(b"file %d" % i)
+        eng.sync_game(g)
+    assert sorted((tmp_path / "cloud/g/blobs/Saves/x").iterdir()) == x_blobs
+    assert all(not v[2].startswith("g/blobs/Saves/x/") for v in eng.list_versions(g, "Saves"))

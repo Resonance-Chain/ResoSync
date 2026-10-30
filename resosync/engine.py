@@ -136,6 +136,11 @@ class SyncEngine:
         file per file) e le versioni vecchie restano lì senza copiarle."""
         return f"{gid}/blobs/{rel}/"
 
+    def _list_direct(self, prefix):
+        """Le chiavi subito dentro `prefix`, non quelle nelle sottocartelle: le versioni di
+        "Saves" (blobs/Saves/) non comprendono quelle di "Saves/x" (blobs/Saves/x/)."""
+        return [k for k in self.backend.list(prefix) if "/" not in k[len(prefix):]]
+
     def _device_tag(self):
         return re.sub(r"[^\w.-]+", "_", self.settings.device_name) or "pc"
 
@@ -749,7 +754,7 @@ class SyncEngine:
     def _restore_known(self, game, rel, h, base, mtimes, changes, remote) -> bool:
         """Rimette in locale il contenuto con hash `h` preso dalle versioni sul cloud e lo
         rende di nuovo quello attuale. False se quella versione non c'è più."""
-        keys = [k for k in self.backend.list(self._k_blobs(game.id, rel))
+        keys = [k for k in self._list_direct(self._k_blobs(game.id, rel))
                 if k.endswith("__" + h[:16])]
         if not keys:
             return False
@@ -794,7 +799,7 @@ class SyncEngine:
         fetched = []
         try:
             for r, h in B.items():
-                keys = [k for k in self.backend.list(self._k_blobs(game.id, r))
+                keys = [k for k in self._list_direct(self._k_blobs(game.id, r))
                         if k.endswith("__" + h[:16])]
                 if not keys:
                     raise FileNotFoundError(r)
@@ -926,7 +931,7 @@ class SyncEngine:
                 raise IOError("il file è cambiato durante la sincronizzazione, riprovo")
             if rel in remote and not remote[rel].get("blob"):
                 self._migrate_legacy(game, rel, remote[rel])
-            existing = sorted(self.backend.list(prefix))
+            existing = sorted(self._list_direct(prefix))
             same = [k for k in existing if k.endswith("__" + h[:16])]
             if same:
                 blob = same[-1]  # stesso contenuto già sul cloud (es. ripristino)
@@ -1082,8 +1087,8 @@ class SyncEngine:
     def list_versions(self, game, rel) -> list:
         """[(etichetta, origine, chiave/percorso)] dal più recente: versioni cloud + backup locali."""
         out = []
-        keys = self.backend.list(self._k_blobs(game.id, rel)) + \
-            self.backend.list(self._k_versions(game.id, rel))
+        keys = self._list_direct(self._k_blobs(game.id, rel)) + \
+            self._list_direct(self._k_versions(game.id, rel))
         for k in keys:
             stamp, _, device = k.rsplit("/", 1)[-1].partition("__")
             device = device.split("__")[0]
