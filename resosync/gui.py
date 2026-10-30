@@ -906,7 +906,7 @@ class RestoreDialog(tk.Toplevel):
 
     def _restore_group(self):
         rel, sel = self._rel(), self.vlist.curselection()
-        if not rel or not sel or not self.versions:
+        if not rel or not sel or not self.versions or _game_open(self):
             return
         _, origin, ref = self.versions[sel[0]]
         key = SyncEngine.group_key(self.game, rel)
@@ -927,7 +927,7 @@ class RestoreDialog(tk.Toplevel):
     def _restore(self):
         rel = self._rel()
         sel = self.vlist.curselection()
-        if not rel or not sel or not self.versions:
+        if not rel or not sel or not self.versions or _game_open(self):
             return
         _, origin, ref = self.versions[sel[0]]
         if not messagebox.askyesno("Ripristina", f"Ripristinare questa versione di {rel}?\n"
@@ -942,6 +942,17 @@ class RestoreDialog(tk.Toplevel):
                 self.app._emit("log", f"Ripristino fallito: {e}")
         threading.Thread(target=work, daemon=True).start()
         self.destroy()
+
+
+def _game_open(dlg) -> bool:
+    """Con il gioco aperto un ripristino non serve: il gioco lo sovrascrive al primo
+    salvataggio con quello che ha in memoria."""
+    service = dlg.app.service
+    if service and service.is_playing(dlg.game.id):
+        messagebox.showwarning("ResoSync", f"Chiudi prima {dlg.game.name}: se resta aperto, al "
+                               "primo salvataggio rimette quello che ha in memoria.", parent=dlg)
+        return True
+    return False
 
 
 class SettingsDialog(tk.Toplevel):

@@ -137,3 +137,30 @@ def test_headless_reload_switches_cloud(tmp_path, monkeypatch):
     finally:
         stop.set()
         t.join(10)
+
+
+@pytest.mark.parametrize("action", ["_restore", "_restore_group"])
+def test_restore_refused_while_game_open(monkeypatch, action):
+    """Ripristinare una versione con il gioco aperto: il gioco la sovrascrive al primo
+    salvataggio automatico con quello che ha in memoria. Va chiuso prima, come per le
+    istantanee."""
+    gui = pytest.importorskip("resosync.gui")
+    from resosync.config import Game
+    warned, restored = [], []
+    monkeypatch.setattr(gui.messagebox, "showwarning", lambda *a, **k: warned.append(a))
+    monkeypatch.setattr(gui.messagebox, "askyesno", lambda *a, **k: True)
+    engine = types.SimpleNamespace(
+        restore_version=lambda *a, **k: restored.append(a),
+        restore_group=lambda *a, **k: restored.append(a) or [])
+    app = types.SimpleNamespace(engine=engine, service=types.SimpleNamespace(
+        is_playing=lambda gid: True, request_sync=lambda *a, **k: None),
+        _log=lambda m: None, _emit=lambda *a: None)
+
+    class List:
+        def curselection(self):
+            return (0,)
+    dlg = types.SimpleNamespace(app=app, game=Game("g", "G", "."), vlist=List(),
+                                versions=[("x", "backup locale", "ref")],
+                                _rel=lambda: "s.sav", destroy=lambda: None)
+    getattr(gui.RestoreDialog, action)(dlg)
+    assert warned and not restored
