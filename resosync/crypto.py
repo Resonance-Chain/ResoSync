@@ -25,6 +25,7 @@ def _derive(passphrase: str, salt: bytes) -> bytes:
 
 
 class EncryptedBackend(Backend):
+    overhead = len(MAGIC) + 12 + 16  # byte in più per file: intestazione, nonce, tag GCM
     def __init__(self, inner: Backend, passphrase: str):
         from cryptography.hazmat.primitives.ciphers.aead import AESGCM
         if not passphrase:

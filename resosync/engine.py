@@ -1004,7 +1004,13 @@ class SyncEngine:
             if rel in remote and not remote[rel].get("blob"):
                 self._migrate_legacy(game, rel, remote[rel])
             existing = sorted(self._list_direct(prefix))
-            same = [k for k in existing if k.endswith("__" + h[:16])]
+            sizes = self.backend.sizes(prefix) if any(
+                k.endswith("__" + h[:16]) for k in existing) else {}
+            # stesso contenuto già sul cloud (es. ripristino): lo riuso, ma solo se ha la
+            # dimensione giusta (un caricamento a metà o una copia rovinata non va riusata)
+            same = [k for k in existing if k.endswith("__" + h[:16])
+                    and sizes.get(k) in (None, st.st_size,
+                                         st.st_size + getattr(self.backend, "overhead", 0))]
             if same:
                 blob = same[-1]  # stesso contenuto già sul cloud (es. ripristino)
             else:
