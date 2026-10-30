@@ -81,3 +81,36 @@ def test_preview_shows_unchanged_screenshot(tmp_path, clock):
     v2 = next(v for v in eng.list_versions(g, "Slot/sav.dat") if v[1].startswith("cloud")
               and (tmp_path / "cloud" / v[2]).read_bytes() == b"dat 2")
     assert eng.preview(g, "Slot/sav.dat", v2[1], v2[2])["image"] == b"PNG immagine"
+
+
+# 3. ripristino di un'istantanea: se la sostituzione di un file fallisce (bloccato), quelli già
+#    rimessi tornano com'erano
+def test_snapshot_restore_rolls_back_on_failure(tmp_path, monkeypatch):
+    import resosync.snapshots as sn
+    from resosync.snapshots import SnapshotStore
+    saves = tmp_path / "saves"
+    saves.mkdir()
+    eng = SyncEngine(Settings(), FolderBackend(tmp_path / "cloud"), tmp_path / "app",
+                     log=lambda m: None)
+    game = Game("g", "G", str(saves))
+    (saves / "a.sav").write_bytes(b"a ieri")
+    (saves / "b.sav").write_bytes(b"b ieri")
+    store = SnapshotStore(tmp_path / "app", "g")
+    snap = store.take(saves, eng.scan_local(game), "ieri")
+    (saves / "a.sav").write_bytes(b"a oggi")
+    (saves / "b.sav").write_bytes(b"b oggi")
+    store.take(saves, eng.scan_local(game), "prima di ripristinare")
+    real = sn.replace_retry
+    calls = []
+
+    def fail_second(src, dst, *a, **k):
+        calls.append(dst)
+        if len(calls) == 2:
+            raise PermissionError("bloccato dal gioco")
+        return real(src, dst, *a, **k)
+    monkeypatch.setattr(sn, "replace_retry", fail_second)
+    with pytest.raises(PermissionError):
+        store.restore(saves, snap)
+    monkeypatch.setattr(sn, "replace_retry", real)
+    assert ((saves / "a.sav").read_bytes(), (saves / "b.sav").read_bytes()) == \
+        (b"a oggi", b"b oggi")

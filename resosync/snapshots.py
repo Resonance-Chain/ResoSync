@@ -153,13 +153,32 @@ class SnapshotStore:
             if cur is not None and not self._obj(cur).exists():
                 raise IOError(f"non ho una copia di sicurezza della versione attuale di {rel} "
                               f"(forse era bloccato dal gioco): non ripristino niente")
-            todo.append((rel, e))
-        for rel, e in todo:
-            dst = Path(game_path, rel)
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            tmp = dst.with_name(dst.name + ".resosync-tmp")
-            shutil.copyfile(self._obj(e["hash"]), tmp)
-            replace_retry(tmp, dst)
-            os.utime(dst, (now, now))
-            n += 1
+            todo.append((rel, e, cur))
+        done = []
+        try:
+            for rel, e, cur in todo:
+                self._put(Path(game_path, rel), e["hash"])
+                done.append((rel, cur))
+                os.utime(Path(game_path, rel), (now, now))
+                n += 1
+        except Exception:
+            # una sostituzione non è riuscita (file bloccato): quelli già rimessi tornano com'
+            # erano, mai metà salvataggio di ieri e metà di oggi
+            for rel, cur in reversed(done):
+                dst = Path(game_path, rel)
+                if cur is None:
+                    dst.unlink(missing_ok=True)
+                else:
+                    self._put(dst, cur)
+            raise
         return n
+
+    def _put(self, dst, h):
+        """Mette in dst il contenuto con hash h (copia accanto e poi sostituisce)."""
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        tmp = dst.with_name(dst.name + ".resosync-tmp")
+        try:
+            shutil.copyfile(self._obj(h), tmp)
+            replace_retry(tmp, dst)
+        finally:
+            tmp.unlink(missing_ok=True)
