@@ -34,3 +34,19 @@ def test_gdrive_listing_picks_the_oldest_duplicate():
     assert a.list("g/") == ["g/manifest.json"]
     b.sizes("g/")  # il listing riempie la cache degli ID
     assert b.read_bytes("g/manifest.json") == b"primo"
+
+
+# 2. gioco rimosso e riaggiunto mentre il cloud non è raggiungibile (motore non ancora
+#    collegato): lo stato vecchio deve sparire lo stesso, sennò i file che c'erano allora e ora
+#    mancano sembrano cancellati (e con "propaga cancellazioni" spariscono dal cloud)
+def test_readded_game_resets_state_even_offline(tmp_path, monkeypatch):
+    import types
+    gui = pytest.importorskip("resosync.gui")
+    from resosync.config import Config, Game
+    cfg = Config(app_dir=tmp_path / "app")
+    state = tmp_path / "app/state/g.json"
+    state.parent.mkdir(parents=True)
+    state.write_text('{"base": {"vecchio.sav": "abc"}}')
+    app = types.SimpleNamespace(cfg=cfg, engine=None, service=None, _refresh=lambda: None)
+    assert gui.App._save_game(app, None, Game("g", "G", str(tmp_path / "saves")), quiet=True)
+    assert not state.exists()

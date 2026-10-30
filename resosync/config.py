@@ -209,6 +209,18 @@ class Config:
                  "rclone": s.rclone_remote.strip().rstrip("/")}.get(s.backend)
         return (s.backend, str(where))
 
+    def reset_state(self, gid) -> None:
+        """Lo stato "com'era all'ultima sync" di un gioco non vale più (cartella cambiata, gioco
+        riaggiunto). Non serve il cloud: si fa anche offline."""
+        (self.app_dir / "state" / f"{gid}.json").unlink(missing_ok=True)
+        reg = self.app_dir / "registry-state.json"
+        try:
+            data = json.loads(reg.read_text())
+            if data.pop(gid, None) is not None:
+                reg.write_text(json.dumps(data))
+        except (OSError, ValueError):
+            pass
+
     def reset_all_states(self) -> None:
         import shutil
         shutil.rmtree(self.app_dir / "state", ignore_errors=True)

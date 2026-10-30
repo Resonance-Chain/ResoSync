@@ -460,11 +460,11 @@ class App(tk.Tk):
             self.cfg.games[self.cfg.games.index(old)] = game
         else:
             self.cfg.games.append(game)
-        if self.engine and (old is None or os.path.normcase(os.path.normpath(old.path)) !=
-                            os.path.normcase(os.path.normpath(game.path))):
+        if old is None or os.path.normcase(os.path.normpath(old.path)) != \
+                os.path.normcase(os.path.normpath(game.path)):
             # Cartella nuova (o gioco riaggiunto): lo stato della vecchia non vale più,
-            # sennò una cartella vuota sembrerebbe "ho cancellato tutto"
-            self.engine.reset_state(game.id)
+            # sennò una cartella vuota sembrerebbe "ho cancellato tutto". Anche offline
+            self.cfg.reset_state(game.id)
         self.cfg.save()
         if self.service:
             self.service.rewatch()
