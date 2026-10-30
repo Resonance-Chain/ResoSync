@@ -7,6 +7,18 @@
 - **Cifratura su un PC nuovo**: se il programma del cloud non aveva ancora scaricato
   crypto.json, ResoSync ne creava uno nuovo che sovrascriveva quello vero, e tutti i
   salvataggi sul cloud diventavano illeggibili. Ora aspetta che arrivi.
+- **Chiusura improvvisa a metà sync** (spegnimento, crash, aggiornamento): uno slot da più file
+  poteva restare mescolato e al giro dopo veniva caricato sul cloud come vincente. Ora ResoSync
+  se ne accorge, rimette lo slot com'era e rifà il lavoro. In più, chiudendo il programma
+  aspetta che la sync in corso finisca.
+- **Sync lunghe**: il lock sul cloud scadeva dopo 2 minuti anche se la sync stava ancora
+  lavorando (salvataggi grandi, rete lenta), e un altro PC poteva entrare a metà. Ora si
+  rinnova finché serve.
+- **File e cartella con lo stesso nome** (es. `Saves/x` prima, `Saves` poi): la pulizia delle
+  versioni di uno cancellava le versioni dell'altro, e i backup locali si bloccavano.
+- **Maiuscole e minuscole**: `Slot.sav` e `slot.sav` sul cloud (uno arrivato dal Deck) su
+  Windows sono lo stesso file e venivano scaricati a turno uno sopra l'altro. Ora se ne
+  sincronizza uno e l'altro viene segnalato.
 
 ## 0.5.4
 
