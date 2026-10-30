@@ -1,4 +1,5 @@
 """Caccia ai bug per la 0.5.5."""
+import os
 from pathlib import Path
 
 import pytest
@@ -245,3 +246,26 @@ def test_cloud_versions_of_file_and_folder_of_same_name(tmp_path, monkeypatch):
         eng.sync_game(g)
     assert sorted((tmp_path / "cloud/g/blobs/Saves/x").iterdir()) == x_blobs
     assert all(not v[2].startswith("g/blobs/Saves/x/") for v in eng.list_versions(g, "Saves"))
+
+
+# 6. Windows non distingue maiuscole e minuscole: "Slot.sav" e "slot.sav" sul cloud (uno dal
+#    PC, uno dal Deck) sono lo stesso file. Non si scaricano a turno uno sopra l'altro
+@pytest.mark.skipif(os.name == "nt", reason="su Windows i due file non possono esistere insieme")
+def test_case_collision_on_case_insensitive_disk(tmp_path, monkeypatch):
+    logs = []
+    deck = SyncEngine(Settings(device_name="Deck"), FolderBackend(tmp_path / "cloud"),
+                      tmp_path / "deck", log=lambda m: None)
+    gd = Game("g", "G", str(tmp_path / "deck-saves"))
+    Path(gd.path).mkdir()
+    Path(gd.path, "Slot.sav").write_bytes(b"maiuscola")
+    Path(gd.path, "slot.sav").write_bytes(b"minuscola")
+    deck.sync_game(gd)
+    pc = SyncEngine(Settings(device_name="PC"), FolderBackend(tmp_path / "cloud"),
+                    tmp_path / "pc", log=logs.append)
+    monkeypatch.setattr(SyncEngine, "_case_insensitive", staticmethod(lambda path: True))
+    gp = Game("g", "G", str(tmp_path / "pc-saves"))
+    st = pc.sync_game(gp)
+    assert len(list(Path(gp.path).iterdir())) == 1  # uno solo, l'altro saltato
+    assert st["errors"] == 1 and any("maiuscol" in m for m in logs)
+    st = pc.sync_game(gp)  # e resta così, senza scaricare a turno
+    assert st["down"] == 0

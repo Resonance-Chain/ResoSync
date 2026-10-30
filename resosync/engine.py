@@ -17,6 +17,7 @@ import json
 import os
 import re
 import shutil
+import sys
 import tempfile
 import threading
 import time
@@ -458,8 +459,10 @@ class SyncEngine:
         groups = {}
         for rel in sorted(set(local) | set(remote) | set(base)):
             groups.setdefault(self.group_key(game, rel), []).append(rel)
+        collide = self._case_collisions(game, local, remote)
+        stats["errors"] += len(collide)
         for rels in groups.values():
-            if any(r in skip for r in rels):
+            if any(r in skip or r in collide for r in rels):
                 continue  # un file del salvataggio è bloccato: decido tutto il gruppo dopo
             if len(rels) == 1 or game.mode == "backup":
                 for rel in rels:
@@ -482,6 +485,32 @@ class SyncEngine:
                 self.log(f"[{game.name}] pulizia spazio non riuscita: {e}")
         self._history(game, stats, changes)
         return stats
+
+    @staticmethod
+    def _case_insensitive(path) -> bool:
+        return os.name == "nt" or sys.platform == "darwin"
+
+    def _case_collisions(self, game, local, remote) -> set:
+        """Su Windows "Slot.sav" e "slot.sav" sono lo stesso file: se sul cloud ci sono tutti e
+        due (uno da Linux / Steam Deck) se ne sincronizza uno solo, quello che c'è qui (o il più
+        recente), invece di scaricarli a turno uno sopra l'altro."""
+        if not self._case_insensitive(game.path):
+            return set()
+        by_low = {}
+        for r in set(local) | set(remote):
+            by_low.setdefault(r.lower(), []).append(r)
+        out = set()
+        for rels in by_low.values():
+            if len(rels) < 2:
+                continue
+            keep = next((r for r in rels if r in local), None) or \
+                max(rels, key=lambda r: remote[r].get("mtime", 0))
+            others = sorted(set(rels) - {keep})
+            out.update(others)
+            self.log(f"[{game.name}] sul cloud ci sono {keep} e {', '.join(others)}, che qui "
+                     f"sono lo stesso file (Windows non distingue maiuscole e minuscole): "
+                     f"sincronizzo solo {keep}")
+        return out
 
     # ---------- cronologia ----------
     def _history(self, game, stats, changes):
