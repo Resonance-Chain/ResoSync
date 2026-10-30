@@ -177,3 +177,32 @@ def test_lock_is_kept_during_long_sync(tmp_path, monkeypatch):
     b.release_lock("g", b.acquire_lock("g"))  # liberato: ora B entra
     time.sleep(2)  # e il lock di A non torna (il rinnovo si è fermato)
     b.release_lock("g", b.acquire_lock("g"))
+
+
+# 4. chiudendo ResoSync (uscita, aggiornamento, spegnimento del Deck) si aspetta la fine
+#    della sync in corso invece di interromperla a metà
+def test_service_stop_waits_for_running_sync(tmp_path):
+    import threading
+    import time
+    from resosync import service
+    from resosync.config import Config
+    cfg = Config(app_dir=tmp_path / "app")
+    saves = tmp_path / "saves"
+    saves.mkdir()
+    cfg.games.append(Game("g", "G", str(saves)))
+    eng = SyncEngine(cfg.settings, FolderBackend(tmp_path / "cloud"), cfg.app_dir,
+                     log=lambda m: None)
+    started, finished = threading.Event(), threading.Event()
+
+    def slow_sync(game, wait_lock=0.0):
+        with eng.lock:
+            started.set()
+            time.sleep(2)
+            finished.set()
+        return {"up": 0, "down": 0, "conflicts": 0, "deleted": 0, "errors": 0}
+    eng.sync_game = slow_sync
+    svc = service.SyncService(cfg, eng, lambda *a: None)
+    svc.start()
+    assert started.wait(5)
+    svc.stop()
+    assert finished.is_set(), "chiuso a metà sync"

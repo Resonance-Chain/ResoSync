@@ -164,8 +164,12 @@ class SyncService:
         self._thread.start()
         self.request_sync()  # giro iniziale
 
-    def stop(self):
+    def stop(self, wait=30.0):
+        """Ferma il servizio. Una sync in corso si lascia finire (fino a `wait` secondi):
+        uscita, aggiornamento o spegnimento non devono interromperla a metà."""
         self._stop.set()
+        if self.engine.lock.acquire(timeout=wait):
+            self.engine.lock.release()
         for gid, playing in list(self._playing.items()):
             game = self.config.get_game(gid)
             if playing and game:
@@ -330,6 +334,8 @@ class SyncService:
                 self._forced.discard(gid)
                 self._allow_playing.discard(gid)
         for gid in due:
+            if self._stop.is_set():
+                break  # si sta chiudendo: non ne comincio un'altra
             self._run(gid)
 
     def _run(self, gid):
