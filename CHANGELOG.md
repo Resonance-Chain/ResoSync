@@ -2,7 +2,7 @@
 
 (Fino alla 0.4.0 il progetto si chiamava SaveSync.)
 
-## 0.5.7 (in sviluppo)
+## 0.5.7
 
 - **Google Drive, PC che non si vedono più**: Drive permette due file con lo stesso nome. Se due
   PC creavano lo stesso file nello stesso momento (configurati insieme, prima sync di un
