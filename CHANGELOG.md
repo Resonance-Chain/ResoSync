@@ -2,6 +2,16 @@
 
 (Fino alla 0.4.0 il progetto si chiamava SaveSync.)
 
+## 0.5.7 (in sviluppo)
+
+- **Google Drive, PC che non si vedono più**: Drive permette due file con lo stesso nome. Se due
+  PC creavano lo stesso file nello stesso momento (configurati insieme, prima sync di un
+  gioco), ognuno usava la sua copia: non si vedevano più le modifiche a vicenda e il lock era di
+  tutti e due. Ora vale sempre la copia più vecchia e il doppione sparisce.
+- **Gioco riaggiunto senza connessione**: lo stato delle sync vecchio restava, e i file che
+  c'erano allora e oggi mancano sembravano cancellati (con "propaga cancellazioni" sparivano dal
+  cloud). Ora si azzera anche offline.
+
 ## 0.5.6
 
 - **Verifica del cloud, falsi allarmi**: con Proton Drive / OneDrive un salvataggio appena
