@@ -21,6 +21,7 @@ try:
 except ImportError:
     psutil = None
 
+VERIFY_EVERY = 600  # secondi: ogni quanto guardare se c'è un gioco da verificare
 BUSY_RETRY = 15   # secondi prima di riprovare se un altro PC tiene il lock
 ERROR_RETRY = 30  # secondi prima di riprovare dopo un errore (es. file bloccato dal gioco)
 
@@ -304,7 +305,7 @@ class SyncService:
             pass  # cloud irraggiungibile: riprovo al prossimo giro
 
     def _loop(self):
-        self._last = {"full": time.time(), "poll": 0, "proc": 0}
+        self._last = {"full": time.time(), "poll": 0, "proc": 0, "verify": time.time()}
         while not self._stop.is_set():
             try:
                 self._tick()
@@ -332,6 +333,9 @@ class SyncService:
         if now - last["proc"] >= 3:
             last["proc"] = now
             self._check_processes()
+        if now - last["verify"] >= VERIFY_EVERY:
+            last["verify"] = now
+            self._verify_one()
 
         with self._lock:
             due = [gid for gid, t in self._pending.items()
@@ -347,6 +351,25 @@ class SyncService:
             if self._stop.is_set():
                 break  # si sta chiudendo: non ne comincio un'altra
             self._run(gid)
+
+    def _verify_one(self):
+        """Verifica periodica del cloud: un gioco per volta, mai mentre ci giochi."""
+        days = self.config.settings.verify_days
+        for g in self.config.games:
+            if not g.enabled or self.is_playing(g.id) or not self.engine.verify_due(g, days):
+                continue
+            try:
+                rep = self.engine.verify_cloud(g)
+            except Exception as e:  # cloud irraggiungibile o occupato: riprovo più tardi
+                self.on_event("log", f"[{g.name}] verifica del cloud non riuscita: {e}")
+                return
+            self.on_event("log", f"[{g.name}] verifica del cloud: {rep['ok']} integri, "
+                                 f"{len(rep['repaired'])} riparati, {len(rep['broken'])} rovinati")
+            if rep["broken"]:
+                self.on_event("notify", f"{g.name}: salvataggi rovinati sul cloud",
+                              ", ".join(r for r, _ in rep["broken"]) + ": nessuna copia buona "
+                              "per ripararli. Apri ResoSync per i dettagli.")
+            return
 
     def _run(self, gid):
         game = self.config.get_game(gid)

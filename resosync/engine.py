@@ -623,6 +623,111 @@ class SyncEngine:
                 freed += size
         return freed
 
+    # ---------- verifica del cloud ----------
+    def verify_cloud(self, game, repair=True) -> dict:
+        """Scarica ogni salvataggio attuale dal cloud e ne controlla l'hash. Se manca o è
+        rovinato lo ricarica da una copia con lo stesso contenuto (il file qui, i backup
+        locali, le istantanee, un'altra copia sul cloud).
+        {"ok": n, "repaired": [file], "broken": [(file, motivo)]}"""
+        with self.lock:
+            token = self.acquire_lock(game.id, 30)
+            try:
+                report = self._verify(game, repair)
+            finally:
+                self.release_lock(game.id, token)
+        done = self._verified()
+        done[game.id] = time.time()
+        p = self.app_dir / "verified.json"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(done))
+        return report
+
+    def _verified(self) -> dict:
+        try:
+            return json.loads((self.app_dir / "verified.json").read_text())
+        except (OSError, ValueError):
+            return {}
+
+    def verify_due(self, game, days) -> bool:
+        """È ora di verificare il cloud di questo gioco? (solo se è già sincronizzato qui)"""
+        return days > 0 and self._state_file(game.id).exists() and \
+            time.time() - self._verified().get(game.id, 0) >= days * 86400
+
+    def _verify(self, game, repair):
+        report = {"ok": 0, "repaired": [], "broken": []}
+        manifest = self.load_manifest(game.id)
+        changes, rotten = {}, []
+        with tempfile.TemporaryDirectory() as td:
+            for rel, e in sorted(manifest["files"].items()):
+                if e.get("deleted"):
+                    continue
+                problem = self._check_blob(game, rel, e, Path(td, "check"))
+                if not problem:
+                    report["ok"] += 1
+                    continue
+                source = self._find_copy(game, rel, e["hash"], Path(td, "copy")) \
+                    if repair else None
+                if source is None:
+                    report["broken"].append((rel, problem))
+                    self.log(f"[{game.name}] VERIFICA: {rel} sul cloud {problem} e non ne "
+                             f"ho una copia uguale")
+                    continue
+                blob = f"{self._k_blobs(game.id, rel)}{_stamp()}__{self._device_tag()}__" \
+                       f"{e['hash'][:16]}"
+                self.backend.upload_file(blob, source)
+                changes[rel] = dict(e, blob=blob)
+                if e.get("blob") and problem != "manca":
+                    rotten.append(e["blob"])
+                report["repaired"].append(rel)
+                self.log(f"[{game.name}] VERIFICA: {rel} sul cloud {problem}: ricaricato")
+        if changes:
+            self._save_manifest(game.id, changes)
+        for key in rotten:  # la copia rovinata non deve restare tra le versioni
+            try:
+                self.backend.delete(key)
+            except Exception:
+                pass
+        return report
+
+    def _check_blob(self, game, rel, entry, tmp):
+        """None se il salvataggio sul cloud è integro, sennò cosa non va."""
+        key = entry.get("blob") or self._k_file(game.id, rel)
+        try:
+            self.backend.download_file(key, tmp)
+        except FileNotFoundError:
+            return "manca"
+        except Exception as e:  # cifrato con un'altra chiave, rovinato, ...
+            return f"non è leggibile ({e})"
+        try:
+            return None if sha256_file(tmp) == entry["hash"] else "è rovinato"
+        finally:
+            tmp.unlink(missing_ok=True)
+
+    def _find_copy(self, game, rel, h, tmp):
+        """Un file con contenuto `h`, da qualsiasi parte: quello del gioco, un backup locale,
+        un'istantanea, un'altra copia sul cloud. Ritorna il percorso o None."""
+        from .snapshots import SnapshotStore
+        candidates = [Path(game.path, rel)]
+        backups = self.app_dir / "backups" / game.id / rel
+        if backups.is_dir():
+            candidates += sorted((f for f in backups.iterdir() if f.is_file()), reverse=True)
+        candidates.append(SnapshotStore(self.app_dir, game.id)._obj(h))
+        for c in candidates:
+            try:
+                if c.is_file() and sha256_file(c) == h:
+                    return c
+            except OSError:
+                continue
+        for key in self._list_direct(self._k_blobs(game.id, rel)):
+            if key.endswith("__" + h[:16]):
+                try:
+                    self.backend.download_file(key, tmp)
+                    if sha256_file(tmp) == h:
+                        return tmp
+                except Exception:
+                    continue
+        return None
+
     # ---------- prima sincronizzazione ----------
     def first_sync_plan(self, game):
         """Prima sync di un gioco su questo PC (o su un cloud nuovo): cosa succederebbe, senza

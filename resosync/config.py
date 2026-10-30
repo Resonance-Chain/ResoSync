@@ -107,6 +107,7 @@ class Settings:
     autostart: bool = False
     close_to_tray: bool = True
     snapshots_keep: int = 10           # istantanee della cartella tenute per gioco
+    verify_days: int = 7               # verifica del cloud ogni N giorni (0 = mai)
     auto_update: bool = True
     update_repo: str = "Resonance-Chain/ResoSync"
     github_token: str = ""             # solo se il repository è privato

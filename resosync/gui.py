@@ -111,6 +111,7 @@ class App(tk.Tk):
                            ("Copia opzioni di avvio Steam", self.copy_steam_options),
                            ("Ripristina versione…", self.restore),
                            ("Istantanee della cartella…", self.show_snapshots),
+                           ("Verifica il cloud", self.verify_cloud),
                            ("Apri cartella salvataggi", self.open_folder), (None, None),
                            ("Rimuovi", self.remove_game)]:
             if label is None:
@@ -529,6 +530,24 @@ class App(tk.Tk):
         g = self._selected()
         if g and self._require_engine():
             StatusDialog(self, g)
+
+    def verify_cloud(self):
+        g = self._selected()
+        if not g or not self.engine:
+            return
+        self._log(f"[{g.name}] verifica del cloud…")
+
+        def done(rep):
+            msg = f"{g.name}: {rep['ok']} salvataggi integri sul cloud."
+            if rep["repaired"]:
+                msg += f"\n\nRiparati (ricaricati da una copia buona): {', '.join(rep['repaired'])}"
+            if rep["broken"]:
+                msg += "\n\nNON riparabili (nessuna copia uguale da nessuna parte):\n" + \
+                    "\n".join(f"• {r}: {why}" for r, why in rep["broken"])
+            self._log(msg.replace("\n\n", " ").replace("\n", " "))
+            (messagebox.showwarning if rep["broken"] else messagebox.showinfo)(
+                "Verifica del cloud", msg, parent=self)
+        run_bg(self, lambda: self.engine.verify_cloud(g), done)
 
     def show_snapshots(self):
         g = self._selected()
@@ -1100,7 +1119,8 @@ class SettingsDialog(tk.Toplevel):
                 ("poll_interval", "Controlla il cloud ogni (secondi)"),
                 ("debounce_seconds", "Attendi dopo una modifica (secondi)"),
                 ("max_versions", "Versioni da tenere per file"),
-                ("snapshots_keep", "Istantanee da tenere per gioco")]
+                ("snapshots_keep", "Istantanee da tenere per gioco"),
+                ("verify_days", "Verifica il cloud ogni (giorni, 0 = mai)")]
         for i, (key, label) in enumerate(rows):
             ttk.Label(f, text=label).grid(row=i, column=0, sticky="w")
             ttk.Entry(f, textvariable=self.v[key], width=24).grid(row=i, column=1, sticky="w",
@@ -1253,7 +1273,8 @@ class SettingsDialog(tk.Toplevel):
         limits = {"poll_interval": (10, "controllo del cloud: almeno 10 secondi"),
                   "debounce_seconds": (1, "attesa dopo una modifica: almeno 1 secondo"),
                   "max_versions": (1, "versioni da tenere: almeno 1"),
-                  "snapshots_keep": (1, "istantanee da tenere: almeno 1")}
+                  "snapshots_keep": (1, "istantanee da tenere: almeno 1"),
+                  "verify_days": (0, "verifica del cloud: 0 o più giorni")}
         for k, (minimum, msg) in limits.items():
             if new[k] < minimum:
                 messagebox.showerror("Impostazioni", msg.capitalize() + ".", parent=self)
