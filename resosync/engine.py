@@ -391,7 +391,7 @@ class SyncEngine:
             except Exception as e:
                 self.log(f"[{game.name}] istantanea non riuscita: {e}")
         skip = self._unreadable.get(game.id, set())
-        manifest = self.load_manifest(game.id)
+        manifest = self._my_view(game, self.load_manifest(game.id))
         if game.mode == "backup":
             # solo backup: conta solo se è cambiato qualcosa QUI (quello che fanno gli
             # altri PC sul cloud non tocca la cartella del gioco)
@@ -415,10 +415,19 @@ class SyncEngine:
             return stats
         token = self.acquire_lock(game.id, wait_lock)
         try:
-            manifest = self.load_manifest(game.id)  # può essere cambiato mentre aspettavamo
+            # può essere cambiato mentre aspettavamo
+            manifest = self._my_view(game, self.load_manifest(game.id))
             return self._sync_game(game, local, manifest)
         finally:
             self.release_lock(game.id, token)
+
+    def _my_view(self, game, manifest) -> dict:
+        """Il manifest visto da questo PC: solo i file che rientrano nei suoi filtri. Quelli
+        fuori (filtri più stretti qui, o appena ristretti) per questo PC non esistono: non si
+        scaricano e non contano come cancellati (con "propaga cancellazioni" sparirebbero
+        dal cloud e dagli altri PC)."""
+        return dict(manifest, files={r: e for r, e in manifest["files"].items()
+                                     if self.matches(game, r)})
 
     @staticmethod
     def _differs(local, manifest, skip=frozenset()) -> bool:
@@ -458,6 +467,9 @@ class SyncEngine:
         remote = {r: e for r, e in manifest["files"].items() if not e.get("deleted")}
         state = self._load_state(game.id)
         base, mtimes = state["base"], state["mtimes"]
+        for r in [r for r in base if not self.matches(game, r)]:
+            base.pop(r)  # uscito dai filtri: non lo seguo più (non è cancellato)
+            mtimes.pop(r, None)
         self._base = base
         changes = {}
         skip = self._unreadable.get(game.id, set())
@@ -794,8 +806,8 @@ class SyncEngine:
             with self.lock:
                 self._registry_step(game)
         local = self.scan_local(game) if Path(game.path).is_dir() else {}
-        remote = {r: e for r, e in self.load_manifest(game.id)["files"].items()
-                  if not e.get("deleted")}
+        remote = {r: e for r, e in self._my_view(game, self.load_manifest(game.id))[
+            "files"].items() if not e.get("deleted")}
         groups = {}
         for rel in sorted(set(local) | set(remote)):
             groups.setdefault(self.group_key(game, rel), []).append(rel)
