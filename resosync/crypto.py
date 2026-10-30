@@ -42,6 +42,15 @@ class EncryptedBackend(Backend):
             if not ok:
                 raise CryptoError("Passphrase sbagliata: non coincide con quella usata sul cloud")
         else:
+            if _has_encrypted_data(inner):
+                # Dati cifrati ma crypto.json non c'è: quasi sempre è solo in ritardo (PC
+                # nuovo, client cloud che sta ancora scaricando). Crearne uno con un sale nuovo
+                # lo sovrascriverebbe e renderebbe illeggibile tutto il cloud.
+                raise CryptoError("Sul cloud ci sono salvataggi cifrati ma manca ancora "
+                                  "crypto.json (le chiavi della cifratura): se il programma "
+                                  "del cloud sta ancora scaricando, aspetta che finisca e "
+                                  "riprova.")
+            # cloud vuoto, o in chiaro (si sta attivando la cifratura): chiavi nuove
             salt = os.urandom(16)
             self._aes = AESGCM(_derive(passphrase, salt))
             inner.write_bytes(META_KEY, json.dumps({
@@ -92,6 +101,15 @@ class EncryptedBackend(Backend):
 
     def sizes(self, prefix):
         return self.inner.sizes(prefix)
+
+
+def _has_encrypted_data(inner: Backend) -> bool:
+    """C'è già qualcosa di cifrato sul cloud? Guardo l'elenco dei giochi o un manifest."""
+    sample = inner.read_bytes("games.json")
+    if sample is None:
+        key = next((k for k in inner.list("") if k.endswith("/manifest.json")), None)
+        sample = inner.read_bytes(key) if key else None
+    return bool(sample) and sample.startswith(MAGIC)
 
 
 def cloud_is_encrypted(backend: Backend) -> bool:
