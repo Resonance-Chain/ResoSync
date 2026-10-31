@@ -85,13 +85,13 @@ SAVE_PARTS = ("sav.dat", "meta.json", "shot.png")  # un salvataggio "alla Cyberp
 
 def run_simulation(tmp_path, seed, steps=300, files=("slot1.sav", "slot2.sav"),
                    propagate=False, multi=False, group_by="folder", deletes=False,
-                   direct=()):
+                   direct=(), names=("A", "B")):
     """multi=True: ogni elemento di `files` è una cartella-salvataggio con 3 file scritti
     insieme dal gioco (stesso contenuto = stessa partita).
     direct: i PC che arrivano al cloud direttamente (rclone, Google Drive/OneDrive via API)
     invece che da una cartella sincronizzata in ritardo."""
     rng = random.Random(seed)
-    names = ["A", "B"]
+    names = list(names)
     cloud = FakeCloudClient({n: tmp_path / f"cloud-{n}" for n in names})
     pcs = {}
     for n in names:
@@ -326,4 +326,40 @@ def test_folder_pc_and_direct_deck(tmp_path, seed, multi):
     for f in {w[2] for w in writes}:
         latest = max((w for w in writes if w[2] == f), key=lambda w: w[0])
         assert final["A"][f] == latest[3], f"seed {seed}: per {f} doveva vincere {latest[3]}"
+
+
+@pytest.mark.parametrize("variant", ["file", "multi", "delete", "mixed"])
+@pytest.mark.parametrize("seed", range(int(os.environ.get("SIM_SEEDS_THREE", "3"))))
+def test_three_devices(tmp_path, seed, variant):
+    """PC, Steam Deck e portatile sullo stesso cloud: tre copie del manifest che arrivano in
+    ordine sparso. Stesse garanzie: convergono, vince il più recente, mai salvataggi mescolati,
+    l'ultimo salvataggio di ognuno resta recuperabile."""
+    names = ("PC", "Deck", "Laptop")
+    multi = variant == "multi"
+    files = ("ManualSave-1", "AutoSave-0") if multi else ("slot1.sav", "slot2.sav")
+    writes, final, pcs, cloud = run_simulation(
+        tmp_path, 60_000 + seed, steps=450, files=files, multi=multi, names=names,
+        deletes=variant == "delete", direct=("Deck",) if variant == "mixed" else ())
+    for pc in names:
+        for f, v in final[pc].items():
+            assert not (isinstance(v, tuple) and v[0] == "MESCOLATO"), f"seed {seed}: {pc} {v}"
+    assert final["PC"] == final["Deck"] == final["Laptop"], \
+        f"seed {seed}: i dispositivi non convergono: {final}"
+    seen = run_simulation.seen_by_sync
+    for f in files:
+        actions = sorted((w for w in writes if w[2] == f), key=lambda w: w[0])
+        if not actions:
+            continue
+        last = actions[-1]
+        if variant != "delete" or (last[3] is not None and last[3] in seen):
+            if last[3] is not None:
+                assert final["PC"][f] == last[3], f"seed {seed}: per {f} doveva vincere {last[3]}"
+    if not multi:
+        stored = _everything_stored(tmp_path)
+        for pc in names:
+            for f in files:
+                mine = [w for w in writes if w[1] == pc and w[2] == f and w[3] is not None
+                        and w[3] in seen]
+                if mine:
+                    assert mine[-1][3] in stored, f"seed {seed}: perso {mine[-1][3]}"
 
