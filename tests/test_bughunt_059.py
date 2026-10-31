@@ -72,11 +72,36 @@ def test_unreadable_subfolder_is_not_a_deletion(tmp_path, monkeypatch):
                 continue
             yield dirpath, dirs, files
     monkeypatch.setattr(em.os, "walk", walk_with_bad_folder)
-    with pytest.raises(OSError):
-        a.sync_game(ga)
+    Path(ga.path, "Slot1/sav.dat").write_bytes(b"Slot1 aggiornato")
+    st = a.sync_game(ga)
+    assert st["deleted"] == 0 and st["errors"] >= 1  # Slot2 saltato per ora, non cancellato
+    assert st["up"] == 1  # il resto si sincronizza lo stesso
     monkeypatch.setattr(em.os, "walk", real_walk)
     b.sync_game(gb)
     assert Path(gb.path, "Slot2/sav.dat").exists()
+    assert Path(gb.path, "Slot1/sav.dat").read_bytes() == b"Slot1 aggiornato"
+
+
+def test_unreadable_folder_without_saves_is_ignored(tmp_path, monkeypatch):
+    """Su Windows Documenti contiene collegamenti che non si possono leggere ("My Music"...):
+    se lì dentro non c'è niente di sincronizzato, la sync va avanti normalmente."""
+    import os
+    import resosync.engine as em
+    a, ga = pc(tmp_path, "A", propagate_deletes=True)
+    Path(ga.path, "My Music").mkdir()
+    Path(ga.path, "slot.sav").write_bytes(b"s")
+    real_walk = os.walk
+
+    def walk(top, onerror=None, **kw):
+        for dirpath, dirs, files in real_walk(top, **kw):
+            if Path(dirpath).name == "My Music":
+                if onerror:
+                    onerror(PermissionError(13, "Accesso negato", dirpath))
+                continue
+            yield dirpath, dirs, files
+    monkeypatch.setattr(em.os, "walk", walk)
+    st = a.sync_game(ga)
+    assert st["up"] == 1 and st["errors"] == 0
 
 
 # 3. modificare un gioco che salva nel registro (anche solo il nome) faceva sparire le sue chiavi

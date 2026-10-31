@@ -342,9 +342,26 @@ class SyncEngine:
                     unreadable.add(rel)
                     self.log(f"[{game.name}] salto {rel} per ora: {e}")
         if broken:
-            # i file là dentro sembrerebbero cancellati (e con "propaga cancellazioni"
-            # sparirebbero dal cloud): meglio non sincronizzare niente e riprovare dopo
-            raise OSError(f"non riesco a leggere {broken[0].filename}: {broken[0].strerror}")
+            # I file già sincronizzati là dentro sembrerebbero cancellati (e con "propaga
+            # cancellazioni" sparirebbero dal cloud): per questo giro si mettono da parte, come
+            # quelli bloccati. Una cartella illeggibile senza salvataggi dentro (su Windows
+            # Documenti ha "My Music" e simili) non cambia niente.
+            dirs = []
+            for e in broken:
+                where = Path(e.filename or root)
+                if where == root:
+                    raise OSError(f"non riesco a leggere la cartella di {game.name}: "
+                                  f"{e.strerror}")
+                try:
+                    dirs.append(where.relative_to(root).as_posix() + "/")
+                except ValueError:
+                    pass  # fuori dalla cartella del gioco (collegamento): non conta
+            for rel in self._load_state(game.id)["base"]:
+                if any(rel.startswith(d) for d in dirs) and rel not in out:
+                    unreadable.add(rel)
+            if unreadable:
+                self.log(f"[{game.name}] non riesco a leggere {', '.join(dirs)}: quei file li "
+                         f"salto per ora")
         return out
 
     # ---------- sync ----------
