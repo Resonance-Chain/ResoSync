@@ -12,6 +12,7 @@ import time
 import tkinter as tk
 from tkinter import messagebox, ttk
 
+from . import tkfix  # noqa: F401 - vedi tkfix.py
 from .backends import make_backend
 from .config import Config, process_names
 from .dialogs import first_sync_text

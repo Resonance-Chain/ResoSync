@@ -28,6 +28,12 @@ Corretti in quest'ultimo giro:
   silenzio e i suoi file sembravano cancellati (con "propaga cancellazioni" sparivano dal cloud).
   Ora quei file si saltano per quel giro (come quelli bloccati dal gioco) e il resto si
   sincronizza; una cartella illeggibile senza salvataggi dentro non conta.
+- **Windows: login a OneDrive / Google Drive e chiusura del programma**: quando Python liberava,
+  in un thread di lavoro, le variabili delle finestre già chiuse, quel thread restava ad
+  aspettare la finestra principale. Il login con la finestra aperta poteva non completarsi, e
+  chiudendo ResoSync durante una sync tutto restava fermo per 30 secondi e la sync veniva
+  interrotta lo stesso. Ora quelle variabili le libera solo la finestra principale. (Trovato
+  dalla nuova prova dell'interfaccia sui runner Windows di GitHub.)
 - **Pulizia delle versioni e limite di spazio**: l'ultima copia di un file cancellato contava come
   una versione vecchia qualsiasi e poteva sparire (con "0 versioni da tenere" o un limite di
   spazio stretto): se la cancellazione era un errore, il salvataggio era perso. Ora non si tocca.

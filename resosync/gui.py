@@ -9,6 +9,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from . import __version__, gamedb, system, updater
+from . import tkfix  # prima di creare variabili Tk: vedi tkfix.py
 from .dialogs import PreviewPanel, SnapshotDialog, StatusDialog, run_bg
 from .backends import make_backend
 from .config import Config, Game, cloud_folder_for, slugify
@@ -60,6 +61,7 @@ class App(tk.Tk):
             pass
 
         self._build()
+        tkfix.install(self)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.report_callback_exception = lambda *a: self._log(f"Errore interfaccia: {a[1]}")
         self.after(150, self._process_events)
@@ -400,6 +402,7 @@ class App(tk.Tk):
     def _quit(self):
         if self.service:
             self.service.stop()
+        tkfix.drain()
         if self.tray is not None:
             try:
                 self.tray.stop()
