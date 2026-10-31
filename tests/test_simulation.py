@@ -328,6 +328,7 @@ def test_folder_pc_and_direct_deck(tmp_path, seed, multi):
         assert final["A"][f] == latest[3], f"seed {seed}: per {f} doveva vincere {latest[3]}"
 
 
+@pytest.mark.timeout(1800)  # tre dispositivi con salvataggi da più file: lunghi sui runner lenti
 @pytest.mark.parametrize("variant", ["file", "multi", "delete", "mixed"])
 @pytest.mark.parametrize("seed", range(int(os.environ.get("SIM_SEEDS_THREE", "3"))))
 def test_three_devices(tmp_path, seed, variant):
@@ -338,7 +339,8 @@ def test_three_devices(tmp_path, seed, variant):
     multi = variant == "multi"
     files = ("ManualSave-1", "AutoSave-0") if multi else ("slot1.sav", "slot2.sav")
     writes, final, pcs, cloud = run_simulation(
-        tmp_path, 60_000 + seed, steps=450, files=files, multi=multi, names=names,
+        tmp_path, 60_000 + seed, steps=int(os.environ.get("SIM_STEPS_THREE", "450")),
+        files=files, multi=multi, names=names,
         deletes=variant == "delete", direct=("Deck",) if variant == "mixed" else ())
     for pc in names:
         for f, v in final[pc].items():

@@ -44,6 +44,7 @@ jobs:
           # tre dispositivi: stessa logica su ogni sistema, e sui dischi lenti di Windows
           # superano i 10 minuti per test. Solo su Linux
           SIM_SEEDS_THREE: ${{ runner.os == 'Windows' && '0' || '2' }}
+          SIM_STEPS_THREE: "250"  # i runner di GitHub sono più lenti: sessioni più corte
       # La prova dell'interfaccia gira in un processo a parte: apre l'app vera e niente di quello
       # che lascia (thread, Tk) deve poter disturbare gli altri test
       - name: Prova dell'interfaccia (Windows)

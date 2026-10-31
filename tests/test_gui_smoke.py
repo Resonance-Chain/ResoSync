@@ -199,3 +199,62 @@ def test_first_sync_confirmation_dialog(app, tmp_path):
     mp.undo()
     assert asked and "Slot1/" in asked[0]
     assert not app.errors, app.errors
+
+
+def test_localhost_callback_diagnostics(app):
+    """Come il login (server su 127.0.0.1, "browser" che torna con il codice), ma con una
+    cronologia di ogni passo: se su qualche sistema non funziona con la finestra aperta, il
+    messaggio dice dove si ferma."""
+    import http.server
+    import socket
+    import threading
+    import urllib.request
+    events, t0 = [], time.time()
+
+    def ev(what):
+        events.append(f"{time.time() - t0:5.2f}s {threading.current_thread().name}: {what}")
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            ev(f"do_GET {self.path}")
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"ok")
+
+        def log_message(self, *args):
+            pass
+
+    class Server(http.server.HTTPServer):
+        def handle_error(self, request, client_address):
+            import traceback
+            ev("errore nel server: " + traceback.format_exc().strip().splitlines()[-1])
+
+    ev(f"timeout predefinito dei socket: {socket.getdefaulttimeout()}")
+    server = Server(("127.0.0.1", 0), Handler)
+    server.timeout = 1
+    ev(f"server su porta {server.server_port}")
+    got = []
+
+    def browser():
+        try:
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            ev("browser: apro la connessione")
+            got.append(opener.open(f"http://127.0.0.1:{server.server_port}/?code=X",
+                                   timeout=8).read())
+            ev("browser: risposta ricevuta")
+        except Exception as e:  # noqa: BLE001
+            ev(f"browser: errore {e!r}")
+    done = []
+
+    def serve():
+        end = time.time() + 8
+        while not got and time.time() < end:
+            ev("server: aspetto una richiesta")
+            server.handle_request()
+        server.server_close()
+        done.append(True)
+    threading.Thread(target=serve, name="server", daemon=True).start()
+    threading.Thread(target=browser, name="browser", daemon=True).start()
+    pump(app, lambda: done, 12)
+    ev("thread vivi: " + ", ".join(sorted(t.name for t in threading.enumerate())))
+    assert got == [b"ok"], "\n".join(events)
