@@ -2,7 +2,7 @@
 
 (Fino alla 0.4.0 il progetto si chiamava SaveSync.)
 
-## 0.6.0 (in preparazione), versione stabile
+## 0.6.0 (versione stabile)
 
 La prima versione stabile. Rispetto alla 0.5.0, in sintesi:
 
