@@ -26,7 +26,8 @@ Corretti in quest'ultimo giro:
 
 - **Cartella non leggibile** (errore della microSD, permessi cambiati): veniva saltata in
   silenzio e i suoi file sembravano cancellati (con "propaga cancellazioni" sparivano dal cloud).
-  Ora la sync si ferma con un errore chiaro e riprova dopo.
+  Ora quei file si saltano per quel giro (come quelli bloccati dal gioco) e il resto si
+  sincronizza; una cartella illeggibile senza salvataggi dentro non conta.
 - **Modifica gioco**: per i giochi che salvano nel registro di Windows, salvare la finestra
   "Modifica gioco" (anche solo per cambiare il nome) faceva sparire le chiavi del registro, che da
   lì non venivano più sincronizzate.
