@@ -130,10 +130,36 @@ jobs:
     permissions:
       contents: write  # serve per creare la Release
     steps:
+      - uses: actions/checkout@v5
+        with:
+          path: src
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
+      - name: Note della versione (dal CHANGELOG)
+        run: |
+          v="${{ github.event.release.tag_name || inputs.release }}"; v="${v#v}"
+          {
+            echo "## Novità"
+            awk -v v="$v" 'index($0, "## " v) == 1 && (length($0) == length("## " v) ||
+                 substr($0, length("## " v) + 1, 1) ~ /[ (,]/) {p=1; next}
+                 p && /^## / {exit} p' src/CHANGELOG.md
+            echo
+            echo "## Download"
+            echo
+            echo '**Windows:** `ResoSync-Setup-*.exe` (installer, consigliato) oppure `ResoSync-portable.zip`.'
+            echo '(`SaveSync-Setup-*.exe` è lo stesso file: serve solo all'"'"'aggiornamento automatico di'
+            echo 'chi ha ancora SaveSync, il vecchio nome del progetto.)'
+            echo 'Windows mostrerà "Windows ha protetto il PC" perché l'"'"'exe non è firmato:'
+            echo '*Ulteriori informazioni > Esegui comunque*.'
+            echo
+            echo '**Steam Deck / Linux:** `ResoSync-linux-x86_64.tar.gz`, istruzioni in'
+            echo "[STEAMDECK.md](https://github.com/${{ github.repository }}/blob/main/STEAMDECK.md)."
+            echo
+            echo "Guida passo passo: [SETUP.md](https://github.com/${{ github.repository }}/blob/main/SETUP.md)"
+          } > notes.md
+          cat notes.md
       - name: Copia dell'installer col vecchio nome (aggiornamento automatico da SaveSync 0.4.0)
         run: |
           for f in dist/ResoSync-Setup-*.exe; do cp "$f" "dist/SaveSync-Setup-${f#dist/ResoSync-Setup-}"; done
@@ -143,17 +169,7 @@ jobs:
           tag_name: ${{ github.event.release.tag_name || format('v{0}', inputs.release) }}
           name: ResoSync ${{ github.event.release.tag_name || format('v{0}', inputs.release) }}
           target_commitish: ${{ github.sha }}
-          body: |
-            **Windows:** `ResoSync-Setup-*.exe` (installer, consigliato) oppure `ResoSync-portable.zip`.
-            (`SaveSync-Setup-*.exe` è lo stesso file: serve solo all'aggiornamento automatico di
-            chi ha ancora SaveSync, il vecchio nome del progetto.)
-            Windows mostrerà "Windows ha protetto il PC" perché l'exe non è firmato:
-            *Ulteriori informazioni > Esegui comunque*.
-
-            **Steam Deck / Linux:** `ResoSync-linux-x86_64.tar.gz`, istruzioni in
-            [STEAMDECK.md](https://github.com/${{ github.repository }}/blob/main/STEAMDECK.md).
-
-            Guida passo passo: [SETUP.md](https://github.com/${{ github.repository }}/blob/main/SETUP.md)
+          body_path: notes.md
           generate_release_notes: true
           files: |
             dist/ResoSync-Setup-*.exe
