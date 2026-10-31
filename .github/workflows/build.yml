@@ -186,6 +186,10 @@ jobs:
           ls -la dist
       - uses: softprops/action-gh-release@v2
         with:
+          # Se c'è il secret RELEASE_TOKEN (token personale con permesso Contents: write) usa
+          # quello: a volte GitHub rifiuta il token automatico ("Resource not accessible by
+          # integration") anche con i permessi giusti
+          token: ${{ secrets.RELEASE_TOKEN || github.token }}
           tag_name: ${{ github.event.release.tag_name || format('v{0}', inputs.release) }}
           name: ResoSync ${{ github.event.release.tag_name || format('v{0}', inputs.release) }}
           target_commitish: ${{ github.sha }}
