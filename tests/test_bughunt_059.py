@@ -152,3 +152,26 @@ def test_crypto_not_ready_is_transient(tmp_path):
     assert isinstance(e, CryptoError)  # chi la trattava come errore di cifratura continua a farlo
     # la regola della finestra per "riprova tra un minuto"
     assert isinstance(e, OSError) and not isinstance(e, PermissionError)
+
+
+# 5. pulizia delle versioni e limite di spazio: l'ultima copia di un file CANCELLATO è una
+#    "versione vecchia" come le altre, ma è anche l'unica rimasta. Non si tocca mai (se la
+#    cancellazione era un errore, è da lì che si recupera)
+@pytest.mark.parametrize("how", ["cleanup", "space"])
+def test_last_copy_of_deleted_file_is_never_pruned(tmp_path, monkeypatch, how):
+    import resosync.engine as em
+    monkeypatch.setattr(em, "GRACE", 0)  # versioni "vecchie", si possono pulire
+    a, ga = pc(tmp_path, "A", propagate_deletes=True)
+    for i in range(3):
+        Path(ga.path, f"{i}.sav").write_bytes(b"x" * 400_000)
+    Path(ga.path, "cancellato.sav").write_bytes(b"ultima copia" * 50_000)
+    a.sync_game(ga)
+    Path(ga.path, "cancellato.sav").unlink()  # cancellazione (per sbaglio?) propagata
+    assert a.sync_game(ga)["deleted"] == 1
+    if how == "cleanup":
+        a.cleanup_versions(ga, 0)
+    else:
+        ga.max_cloud_mb = 1
+        a.enforce_space(ga)
+    left = list((tmp_path / "cloud/g/blobs/cancellato.sav").iterdir())
+    assert [p.read_bytes()[:12] for p in left] == [b"ultima copia"]

@@ -28,6 +28,9 @@ Corretti in quest'ultimo giro:
   silenzio e i suoi file sembravano cancellati (con "propaga cancellazioni" sparivano dal cloud).
   Ora quei file si saltano per quel giro (come quelli bloccati dal gioco) e il resto si
   sincronizza; una cartella illeggibile senza salvataggi dentro non conta.
+- **Pulizia delle versioni e limite di spazio**: l'ultima copia di un file cancellato contava come
+  una versione vecchia qualsiasi e poteva sparire (con "0 versioni da tenere" o un limite di
+  spazio stretto): se la cancellazione era un errore, il salvataggio era perso. Ora non si tocca.
 - **Cifratura su un PC nuovo**: con "manca ancora crypto.json" (programma del cloud che sta ancora
   scaricando) la finestra si fermava con un errore e non riprovava più. Ora riprova da sola ogni
   minuto, come quando manca la rete.

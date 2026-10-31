@@ -662,11 +662,19 @@ class SyncEngine:
                 "n_versions": len(old)}
 
     def _old_versions(self, game) -> list:
-        """Versioni non attuali, dalla più vecchia: [(chiave, byte)]."""
-        current = {e.get("blob") for e in self.load_manifest(game.id)["files"].values()
-                   if not e.get("deleted")}
+        """Versioni non attuali che si possono cancellare, dalla più vecchia: [(chiave, byte)].
+        Mai l'ultima copia di un file cancellato: è una versione vecchia come le altre ma anche
+        l'unica rimasta, e se la cancellazione era un errore si recupera da lì."""
+        files = self.load_manifest(game.id)["files"]
+        current = {e.get("blob") for e in files.values() if not e.get("deleted")}
         sizes = self.backend.sizes(f"{game.id}/blobs/")
         sizes.update(self.backend.sizes(f"{game.id}/versions/"))
+        for rel, e in files.items():
+            if e.get("deleted"):
+                mine = [k for k in sizes if k.rsplit("/", 1)[0] + "/" in (
+                    self._k_blobs(game.id, rel), self._k_versions(game.id, rel))]
+                if mine:
+                    current.add(_by_date(mine)[-1])
         old = {k: v or 0 for k, v in sizes.items() if k not in current and not _young(k)}
         return [(k, old[k]) for k in _by_date(old)]
 
