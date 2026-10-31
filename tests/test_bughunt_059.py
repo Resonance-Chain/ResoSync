@@ -48,3 +48,32 @@ def test_pcs_with_different_filters_do_not_delete_each_others_files(tmp_path):
     assert not Path(gb.path, "impostazioni.ini").exists()
     a.sync_game(ga)
     assert Path(ga.path, "impostazioni.ini").read_bytes() == b"i"
+
+
+# 2. una sottocartella che non si riesce a leggere (errore della microSD, permessi) veniva
+#    saltata in silenzio: i suoi file sembravano cancellati
+def test_unreadable_subfolder_is_not_a_deletion(tmp_path, monkeypatch):
+    import os
+    import resosync.engine as em
+    a, ga = pc(tmp_path, "A", propagate_deletes=True)
+    b, gb = pc(tmp_path, "B", propagate_deletes=True)
+    for slot in ("Slot1", "Slot2", "Slot3"):
+        Path(ga.path, slot).mkdir()
+        Path(ga.path, slot, "sav.dat").write_bytes(slot.encode())
+    a.sync_game(ga)
+    b.sync_game(gb)
+    real_walk = os.walk
+
+    def walk_with_bad_folder(top, onerror=None, **kw):
+        for dirpath, dirs, files in real_walk(top, **kw):
+            if Path(dirpath).name == "Slot2":
+                if onerror:
+                    onerror(PermissionError(13, "Permission denied", dirpath))
+                continue
+            yield dirpath, dirs, files
+    monkeypatch.setattr(em.os, "walk", walk_with_bad_folder)
+    with pytest.raises(OSError):
+        a.sync_game(ga)
+    monkeypatch.setattr(em.os, "walk", real_walk)
+    b.sync_game(gb)
+    assert Path(gb.path, "Slot2/sav.dat").exists()

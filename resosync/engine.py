@@ -325,7 +325,8 @@ class SyncEngine:
         root = Path(game.path)
         out = {}
         unreadable = self._unreadable[game.id] = set()
-        for dirpath, dirs, files in os.walk(root):
+        broken = []  # cartelle che non si riesce a leggere (os.walk le salterebbe in silenzio)
+        for dirpath, dirs, files in os.walk(root, onerror=broken.append):
             for f in files:
                 if f.endswith(TEMP_SUFFIXES):
                     continue  # rimasugli di un download o di una copia interrotti
@@ -340,6 +341,10 @@ class SyncEngine:
                     # NON è un file cancellato: va escluso dal confronto di questo giro
                     unreadable.add(rel)
                     self.log(f"[{game.name}] salto {rel} per ora: {e}")
+        if broken:
+            # i file là dentro sembrerebbero cancellati (e con "propaga cancellazioni"
+            # sparirebbero dal cloud): meglio non sincronizzare niente e riprovare dopo
+            raise OSError(f"non riesco a leggere {broken[0].filename}: {broken[0].strerror}")
         return out
 
     # ---------- sync ----------
