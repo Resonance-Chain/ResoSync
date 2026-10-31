@@ -28,6 +28,9 @@ Corretti in quest'ultimo giro:
   silenzio e i suoi file sembravano cancellati (con "propaga cancellazioni" sparivano dal cloud).
   Ora quei file si saltano per quel giro (come quelli bloccati dal gioco) e il resto si
   sincronizza; una cartella illeggibile senza salvataggi dentro non conta.
+- **Cifratura su un PC nuovo**: con "manca ancora crypto.json" (programma del cloud che sta ancora
+  scaricando) la finestra si fermava con un errore e non riprovava più. Ora riprova da sola ogni
+  minuto, come quando manca la rete.
 - **Modifica gioco**: per i giochi che salvano nel registro di Windows, salvare la finestra
   "Modifica gioco" (anche solo per cambiare il nome) faceva sparire le chiavi del registro, che da
   lì non venivano più sincronizzate.

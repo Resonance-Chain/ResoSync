@@ -127,3 +127,24 @@ def test_editing_game_keeps_registry_keys(tmp_path, monkeypatch):
         on_save=lambda o, n: saved.append(n) or True, destroy=lambda: None)
     gui.GameDialog._save(dlg)
     assert saved and saved[0].registry == [key]
+
+
+# 4. "manca ancora crypto.json" (PC nuovo, cloud non ancora scaricato) è temporaneo: la
+#    finestra deve riprovare da sola come quando manca la rete, non fermarsi con un errore
+def test_crypto_not_ready_is_transient(tmp_path):
+    from resosync.crypto import CryptoError, CryptoNotReady, EncryptedBackend
+    cloud = tmp_path / "cloud"
+    s = Settings(device_name="PC", encrypt=True, passphrase="passphrase di prova")
+    eng = SyncEngine(s, EncryptedBackend(FolderBackend(cloud), s.passphrase), tmp_path / "a",
+                     log=lambda m: None)
+    g = Game("g", "G", str(tmp_path / "saves"))
+    Path(g.path).mkdir()
+    Path(g.path, "s.sav").write_bytes(b"x")
+    eng.sync_game(g)
+    (cloud / "crypto.json").unlink()
+    with pytest.raises(CryptoNotReady) as err:
+        EncryptedBackend(FolderBackend(cloud), s.passphrase)
+    e = err.value
+    assert isinstance(e, CryptoError)  # chi la trattava come errore di cifratura continua a farlo
+    # la regola della finestra per "riprova tra un minuto"
+    assert isinstance(e, OSError) and not isinstance(e, PermissionError)

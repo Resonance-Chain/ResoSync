@@ -19,6 +19,11 @@ class CryptoError(Exception):
     pass
 
 
+class CryptoNotReady(CryptoError, ConnectionError):
+    """crypto.json non è ancora arrivato: non è un errore vero, basta aspettare e riprovare
+    (per la finestra e il servizio è come la rete che non c'è ancora)."""
+
+
 def _derive(passphrase: str, salt: bytes) -> bytes:
     from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
     return Scrypt(salt=salt, length=32, n=2 ** 15, r=8, p=1).derive(passphrase.encode("utf-8"))
@@ -47,7 +52,7 @@ class EncryptedBackend(Backend):
                 # Dati cifrati ma crypto.json non c'è: quasi sempre è solo in ritardo (PC
                 # nuovo, client cloud che sta ancora scaricando). Crearne uno con un sale nuovo
                 # lo sovrascriverebbe e renderebbe illeggibile tutto il cloud.
-                raise CryptoError("Sul cloud ci sono salvataggi cifrati ma manca ancora "
+                raise CryptoNotReady("Sul cloud ci sono salvataggi cifrati ma manca ancora "
                                   "crypto.json (le chiavi della cifratura): se il programma "
                                   "del cloud sta ancora scaricando, aspetta che finisca e "
                                   "riprova.")
