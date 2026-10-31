@@ -2,6 +2,35 @@
 
 (Fino alla 0.4.0 il progetto si chiamava SaveSync.)
 
+## 0.6.0 (in preparazione), versione stabile
+
+La prima versione stabile. Rispetto alla 0.5.0, in sintesi:
+
+- **Cloud**: oltre a cartella, Google Drive, OneDrive e S3 c'è **rclone** (più di 70 servizi,
+  Proton Drive compreso anche sullo Steam Deck). Un errore di rete non viene mai scambiato per
+  "cloud vuoto", su nessun tipo di cloud.
+- **Salvataggi nel registro di Windows**, **verifica del cloud** settimanale con riparazione,
+  **anteprima della prima sincronizzazione** su un PC nuovo.
+- **Mai a metà**: un file che il gioco sta scrivendo non viene caricato né sovrascritto; gli slot
+  da più file si sostituiscono e si ripristinano sempre interi, anche dopo uno spegnimento
+  improvviso; i ripristini sono tutto o niente.
+- **Mai all'indietro**, anche con un dispositivo che ha l'orologio sbagliato, e mai una
+  cancellazione per sbaglio (cartelle svuotate, filtri ristretti, cartelle non leggibili, giochi
+  riaggiunti).
+- Provato con un simulatore che fa giocare 2 e 3 dispositivi a caso sullo stesso cloud (cartelle
+  cloud in ritardo e accesso diretto, salvataggi da più file, cancellazioni): prima del rilascio
+  circa 350 sessioni simulate, ognuna con centinaia di salvataggi, più una prova di tutte le
+  finestre.
+
+Corretti in quest'ultimo giro:
+
+- **Cartella non leggibile** (errore della microSD, permessi cambiati): veniva saltata in
+  silenzio e i suoi file sembravano cancellati (con "propaga cancellazioni" sparivano dal cloud).
+  Ora la sync si ferma con un errore chiaro e riprova dopo.
+- **Modifica gioco**: per i giochi che salvano nel registro di Windows, salvare la finestra
+  "Modifica gioco" (anche solo per cambiare il nome) faceva sparire le chiavi del registro, che da
+  lì non venivano più sincronizzate.
+
 ## 0.5.9
 
 - **Filtri dei file**: escludendo dei file da un gioco (es. `*.bak`), quelli già sincronizzati
