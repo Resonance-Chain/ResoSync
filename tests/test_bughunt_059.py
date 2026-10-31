@@ -72,8 +72,12 @@ def test_unreadable_subfolder_is_not_a_deletion(tmp_path, monkeypatch):
                 continue
             yield dirpath, dirs, files
     monkeypatch.setattr(em.os, "walk", walk_with_bad_folder)
+    logs = []
+    a.log = logs.append
     Path(ga.path, "Slot1/sav.dat").write_bytes(b"Slot1 aggiornato")
     st = a.sync_game(ga)
+    a.sync_game(ga)
+    assert sum("non riesco a leggere" in m for m in logs) == 1  # non a ogni tentativo
     assert st["deleted"] == 0 and st["errors"] >= 1  # Slot2 saltato per ora, non cancellato
     assert st["up"] == 1  # il resto si sincronizza lo stesso
     monkeypatch.setattr(em.os, "walk", real_walk)

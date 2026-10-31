@@ -359,7 +359,9 @@ class SyncEngine:
             for rel in self._load_state(game.id)["base"]:
                 if any(rel.startswith(d) for d in dirs) and rel not in out:
                     unreadable.add(rel)
-            if unreadable:
+            said, key = self._said.setdefault(game.id, set()), ("dirs", tuple(sorted(dirs)))
+            if unreadable and key not in said:  # una volta sola, non a ogni tentativo
+                said.add(key)
                 self.log(f"[{game.name}] non riesco a leggere {', '.join(dirs)}: quei file li "
                          f"salto per ora")
         return out
