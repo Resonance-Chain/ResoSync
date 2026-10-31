@@ -32,7 +32,7 @@ jobs:
         run: |
           if [ "$RUNNER_OS" = Windows ]; then choco install rclone -y --no-progress
           else sudo apt-get install -y rclone; fi
-      - run: python -m pytest -v --timeout=600 tests --ignore=tests/test_gui_smoke.py
+      - run: python -m pytest -v --timeout=600 tests --ignore=tests/test_gui_smoke.py --ignore=tests/test_tk_threads.py
         env:
           # le simulazioni sono lente sul disco dei runner Windows: lì ne bastano poche
           SIM_SEEDS: ${{ runner.os == 'Windows' && '3' || '8' }}
@@ -53,7 +53,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: |
-          python -m pytest -v --timeout=300 tests/test_gui_smoke.py > gui.txt 2>&1 || {
+          python -m pytest -v --timeout=300 tests/test_gui_smoke.py tests/test_tk_threads.py > gui.txt 2>&1 || {
             cat gui.txt
             echo "::error title=Prova dell'interfaccia::$(tail -c 6000 gui.txt | sed -e ':a;N;$!ba' -e 's/%/%25/g;s/\r/%0D/g;s/\n/%0A/g')"
             exit 1; }
@@ -62,7 +62,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update -q && sudo apt-get install -y -q xvfb
-          xvfb-run -a python -m pytest -v --timeout=300 tests/test_gui_smoke.py > gui.txt 2>&1 || {
+          xvfb-run -a python -m pytest -v --timeout=300 tests/test_gui_smoke.py tests/test_tk_threads.py > gui.txt 2>&1 || {
             cat gui.txt
             echo "::error title=Prova dell'interfaccia::$(tail -c 6000 gui.txt | sed -e ':a;N;$!ba' -e 's/%/%25/g;s/\r/%0D/g;s/\n/%0A/g')"
             exit 1; }

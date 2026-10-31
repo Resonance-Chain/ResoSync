@@ -180,6 +180,12 @@ class SyncService:
                 self._presence(game, False)
         if self._observer:
             self._observer.stop()
+        # e si aspetta che i thread escano davvero (pochi secondi al massimo): tengono in vita
+        # chi li ha creati, e vanno chiusi prima di andarsene
+        me = threading.current_thread()
+        for t in (self._observer, self._thread):
+            if t is not None and t is not me and t.is_alive():
+                t.join(timeout=5)
 
     def is_playing(self, game_id) -> bool:
         return self._playing.get(game_id, False)

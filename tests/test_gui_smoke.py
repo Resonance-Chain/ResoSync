@@ -21,6 +21,16 @@ def _display_ok():
 pytestmark = pytest.mark.skipif(not _display_ok(), reason="nessun display")
 
 
+@pytest.fixture(autouse=True)
+def _free_tk_in_main_thread():
+    """Dopo che pytest ha lasciato la finestra: la si libera qui, nel thread principale.
+    Un interprete Tcl liberato dal garbage collector in un altro thread manda in crash il
+    processo (l'app vera ha una sola finestra radice per tutta la vita, i test tante)."""
+    yield
+    import gc
+    gc.collect()
+
+
 @pytest.fixture
 def app(tmp_path, monkeypatch):
     from test_deck import use_app_dir
@@ -61,6 +71,11 @@ def app(tmp_path, monkeypatch):
     if a.service:
         a.service.stop(wait=5)
     a.destroy()
+    # la finestra (un interprete Tcl) si libera qui, nel thread principale: liberata più tardi
+    # da un thread qualsiasi manderebbe in crash il processo dei test
+    import gc
+    del a
+    gc.collect()
 
 
 def pump(app, cond, timeout=5.0):
