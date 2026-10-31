@@ -121,12 +121,20 @@ dalla lista di quelli aperti.
   `%USERPROFILE%\.resosync\backups`. Da *Ripristina versione* torni indietro.
 - **Mai all'indietro**: se il cloud propone un salvataggio più vecchio di quello già
   sincronizzato (succede con le cartelle cloud quando un file arriva in ritardo), ResoSync non
-  lo scarica e ricarica il suo.
-- **Lock**: prima di scrivere, un PC prende un lock sul cloud (scade dopo 2 minuti se il PC si
-  pianta). Gli altri aspettano e riprovano. Con l'opzione "Cartella" il lock vale solo quando il
-  programma del cloud ha già sincronizzato, per questo valgono anche le due regole sopra.
+  lo scarica e ricarica il suo. Ogni caricamento ricorda da quali versioni discende, così un
+  dispositivo con l'orologio sbagliato non si vede scartare i salvataggi nuovi.
+- **Mai a metà**: ogni file si scarica e si verifica (hash) accanto all'originale e poi lo
+  sostituisce in un colpo. Gli slot fatti di più file si sostituiscono tutti insieme, e se
+  qualcosa si interrompe (file bloccato, spegnimento) tornano com'erano. Un file che il gioco sta
+  scrivendo non viene né caricato né sovrascritto: si riprova al giro dopo.
+- **Lock**: prima di scrivere, un PC prende un lock sul cloud, rinnovato finché la sync lavora
+  (se il PC si pianta scade dopo 2 minuti). Gli altri aspettano e riprovano. Con l'opzione
+  "Cartella" il lock vale solo quando il programma del cloud ha già sincronizzato, per questo
+  valgono anche le regole sopra.
 - **Cancellazioni**: di default non vengono propagate (un file cancellato per sbaglio torna).
-  Anche se le attivi, una cartella che si svuota di colpo non cancella niente dal cloud.
+  Anche se le attivi, se sparisce più di metà dei salvataggi in un colpo (cartella svuotata, gioco
+  reinstallato) non si cancella niente dal cloud. I file esclusi dai filtri non contano come
+  cancellati.
 
 Struttura sul cloud:
 

@@ -60,6 +60,15 @@ Usa **lo stesso Client ID** sul Deck: non serve crearne un altro.
    Windows che girano con Proton (dentro `steamapps/compatdata`), quelli sulla microSD e quelli
    di Heroic. Selezionali e **Aggiungi selezionati**: i nomi coincidono con quelli del PC, quindi
    si agganciano da soli.
+5. **Resta in modalità desktop finché non finiscono le prime sincronizzazioni.** Se il Deck ha
+   già dei salvataggi suoi di un gioco, diversi da quelli del PC, ResoSync mostra quale versione
+   terrebbe per ognuno e chiede conferma (prima fa sempre un'istantanea). In modalità gioco non
+   può chiedere: il servizio aspetta e lo scrive nel log, mentre il launcher con `--quiet`
+   procede (vince il salvataggio più recente, l'altro resta tra le versioni).
+
+> **Giochi che salvano nel registro di Windows**: sul Deck il registro dei giochi Proton per
+> ora non viene toccato. Il loro salvataggio arriva sul Deck solo come copia (cartella
+> `.resosync-registry`), quindi per questi giochi PC e Deck non si sincronizzano.
 
 ## 4. Opzioni di avvio di Steam (consigliato)
 

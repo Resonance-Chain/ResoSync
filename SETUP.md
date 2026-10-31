@@ -4,17 +4,16 @@ Tempo totale: circa 20 minuti la prima volta, 5 minuti per ogni PC in più.
 
 ## 1. Ottenere il programma per Windows
 
-Il programma viene compilato in automatico da GitHub (gratis) ogni volta che il codice cambia.
-
-1. Apri il repository su GitHub, scheda **Actions**.
-2. Clicca sull'ultima esecuzione di **Test e build** con la spunta verde.
-3. In fondo alla pagina, sotto **Artifacts**, scarica **ResoSync-windows** (uno zip).
-4. Dentro trovi:
+1. Apri la pagina **Releases** del repository su GitHub
+   (<https://github.com/Resonance-Chain/ResoSync/releases>).
+2. Dall'ultima versione scarica:
    - `ResoSync-Setup-x.y.z.exe`: l'installer (consigliato)
    - `ResoSync-portable.zip`: la versione senza installazione
 
-> Nuova versione? Su GitHub *Actions > Test e build > Run workflow*, scrivi la versione (es. `0.3.0`)
-> e avvia: in 10 minuti compare la Release con installer e zip.
+Steam Deck / Linux: `ResoSync-linux-x86_64.tar.gz`, guida in [STEAMDECK.md](STEAMDECK.md).
+
+> Per chi gestisce il repository: *Actions > Test e build > Run workflow*, scrivi la versione
+> (es. `0.6.0`) e avvia. Dopo i test (circa 40 minuti) compare la Release con installer e zip.
 
 ## 2. Installare
 
@@ -25,12 +24,15 @@ Il programma viene compilato in automatico da GitHub (gratis) ogni volta che il 
 
 ## 3. Scegliere dove salvare (una volta sola)
 
-Al primo avvio si aprono le Impostazioni. Hai quattro strade. **Se non sai quale scegliere, usa la A.**
+Al primo avvio si aprono le Impostazioni. Hai cinque strade. **Se non sai quale scegliere, usa la A.**
+Se userai anche lo Steam Deck, leggi prima [STEAMDECK.md](STEAMDECK.md): sul Deck non tutte vanno
+bene allo stesso modo.
 
-### A. Cartella dentro Google Drive / OneDrive / Dropbox (consigliata per iniziare)
+### A. Cartella dentro Proton Drive / Google Drive / OneDrive / Dropbox (consigliata per iniziare)
 
 1. Assicurati di avere il programma del cloud installato e collegato:
    - OneDrive: già presente in Windows 10/11
+   - Proton Drive: [app per Windows](https://proton.me/drive/download)
    - Google Drive: [Drive per desktop](https://www.google.com/drive/download/)
    - Dropbox: [app desktop](https://www.dropbox.com/install)
 2. In ResoSync: **Cartella** > **Sfoglia…** > scegli la cartella del cloud
@@ -70,6 +72,15 @@ premi di nuovo **Accedi…**. Per evitarlo: Schermata consenso > **Pubblica app*
 ### D. S3 (Cloudflare R2, Backblaze B2, AWS)
 
 Per chi lo conosce già: bucket, endpoint, access key e secret key. Cloudflare R2 ha 10 GB gratis.
+
+### E. rclone (Proton Drive senza programma, pCloud, Mega, SFTP… oltre 70 servizi)
+
+1. Installa [rclone](https://rclone.org/downloads/) (su Windows: `winget install Rclone.Rclone`).
+2. Da un terminale: `rclone config` > `n` (nuovo remote), scegli il servizio e segui le domande.
+3. In ResoSync: **rclone** > **Cerca** > scegli il remote e aggiungi la cartella, es.
+   `proton:ResoSync` > **Salva**.
+
+Può puntare alla stessa cartella che un altro PC usa con l'opzione A: i dati sono gli stessi.
 
 ## 4. Aggiungere i giochi
 
@@ -112,9 +123,10 @@ Se il gioco ha già delle opzioni di avvio, mettile **dopo** `%command%`.
    Per i giochi aggiunti a mano: **Aggiungi gioco** e scegli il nome dal menu a tendina (sono i
    giochi già presenti sul cloud).
 
-> ⚠️ **Prima sincronizzazione sul secondo PC**: se ha già dei salvataggi suoi dello stesso gioco,
-> vince il più recente. L'altro non si perde (è in *Ripristina versione*), ma se vuoi andare sul
-> sicuro fai prima una copia della cartella.
+> **Prima sincronizzazione sul secondo PC**: se ha già dei salvataggi suoi dello stesso gioco,
+> diversi da quelli sul cloud, ResoSync non decide da solo: mostra per ognuno quale versione
+> terrebbe (la più recente) e chiede conferma. Prima fa comunque un'istantanea della cartella,
+> e la versione scartata resta in *Ripristina versione*.
 
 ## 7. Cifratura (facoltativa)
 
@@ -136,6 +148,12 @@ cloud non si recuperano (quelli sui PC restano).
   destra. Aggiorna tutti i PC.
 - **Giochi con il cloud di Steam/Epic/GOG**: puoi metterli in *Solo backup* (doppio clic >
   Modifica): ResoSync tiene le versioni senza fare a gara con il cloud dello store.
+- **Tasto destro > Verifica il cloud**: controlla che ogni salvataggio sul cloud sia integro e
+  ripara quelli rovinati da una copia buona. Lo fa anche da solo una volta a settimana
+  (Impostazioni > Comportamento).
+- **Giochi che salvano nel registro di Windows** (alcuni giochi Unity, molti giochi vecchi):
+  *Rileva giochi* li trova e li sincronizza come gli altri. Nella cartella del gioco compare
+  `.resosync-registry`: è il registro esportato, lascialo dov'è.
 
 ## Problemi?
 
@@ -144,7 +162,10 @@ cloud non si recuperano (quelli sui PC restano).
 | Stato "Errore: …" | leggi il riquadro *Attività*; spesso è il gioco che tiene il file aperto, ResoSync riprova da solo |
 | "Serve il login" | Impostazioni > Cloud > **Accedi…** |
 | "In attesa: PC-X sta sincronizzando" | normale, riprova da solo; se dura più di 2 minuti il lock scade |
-| Un salvataggio è sparito o è vecchio | tasto destro > **Ripristina versione** |
+| Un salvataggio è sparito o è vecchio | tasto destro > **Ripristina versione**, oppure **Istantanee della cartella** |
+| Stato "Prima sincronizzazione: da confermare" | premi **Sincronizza** sul gioco: compare cosa succede e chiede conferma |
+| Avviso "salvataggi rovinati sul cloud" | nessuna copia buona per ripararli: se il file è ancora giusto su un altro PC, sincronizza da lì |
+| "manca ancora crypto.json" | cloud cifrato non ancora scaricato del tutto dal programma del cloud: aspetta e riprova |
 | Non vedo la finestra | icona di ResoSync nella barra in basso a destra (freccetta ^) |
 
 File utili, in `%USERPROFILE%\.resosync`:
