@@ -2,7 +2,7 @@
 
 (Fino alla 0.4.0 il progetto si chiamava SaveSync.)
 
-## 0.5.9 (in sviluppo)
+## 0.5.9
 
 - **Filtri dei file**: escludendo dei file da un gioco (es. `*.bak`), quelli già sincronizzati
   contavano come cancellati e con "propaga cancellazioni" sparivano dagli altri PC. E con filtri
