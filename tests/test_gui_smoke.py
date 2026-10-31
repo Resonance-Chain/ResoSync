@@ -42,6 +42,7 @@ def app(tmp_path, monkeypatch):
     cfg = Config(app_dir=tmp_path / "app")
     cfg.settings.folder_path = str(tmp_path / "cloud")
     cfg.settings.device_name = "PC"
+    cfg.settings.auto_update = False  # niente richieste in rete durante la prova
     cfg.games.append(Game("g", "Gioco", str(saves), group_by="folder"))
     cfg.save()
     a = gui.App(minimized=True, instance=None)
@@ -141,14 +142,60 @@ def test_every_window_opens_without_errors(app):
     assert not app.errors, app.errors
 
 
+def test_login_works_with_window_open(app, tmp_path, monkeypatch):
+    """Il login a OneDrive / Google parte dalla finestra aperta: il ritorno dal browser (una
+    richiesta a 127.0.0.1) deve arrivare anche con l'app che gira."""
+    import threading
+    import urllib.parse
+    import urllib.request
+    from resosync import oauth
+    from resosync.vault import Vault
+    from test_oauth_http import FakeResp
+
+    monkeypatch.setattr(oauth.requests, "post", lambda url, data, timeout: FakeResp(
+        200, {"access_token": "A1", "refresh_token": "R1", "expires_in": 3600}))
+    client = oauth.OAuthClient("onedrive", "cid", Vault(tmp_path / "vault"))
+    seen = []
+
+    def browser(url):
+        q = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+        target = (q["redirect_uri"][0].replace("localhost", "127.0.0.1") +
+                  f"/?code=CODE&state={q['state'][0]}")
+
+        def follow():
+            try:
+                opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+                opener.open(target, timeout=10).read()
+            except Exception as e:  # noqa: BLE001
+                seen.append(repr(e))
+        threading.Thread(target=follow, daemon=True).start()
+    done = {}
+    t = threading.Thread(target=lambda: done.setdefault("r", _try(client.login, 10, browser)))
+    t.start()
+    pump(app, lambda: not t.is_alive(), 15)  # la finestra resta viva mentre aspetta
+    assert done.get("r") is None, f"login non riuscito: {done.get('r')}, browser: {seen}"
+    assert client.access_token() == "A1"
+
+
+def _try(fn, *args):
+    try:
+        fn(*args)
+    except Exception as e:  # noqa: BLE001
+        return repr(e)
+    return None
+
+
 def test_first_sync_confirmation_dialog(app, tmp_path):
     """Il servizio chiede conferma della prima sincronizzazione: la finestra la mostra."""
     asked = []
     from tkinter import messagebox
-    messagebox.askyesno = lambda title, text, **k: asked.append(text) or False
+    import pytest as _pytest
+    mp = _pytest.MonkeyPatch()
+    mp.setattr(messagebox, "askyesno", lambda title, text, **k: asked.append(text) or False)
     app._confirm_first("g", {"down": ["a"], "up": [], "conflicts": [
         {"name": "Slot1/", "winner": "local", "local_time": time.time(),
          "remote_time": time.time() - 60, "device": "Deck"}]})
     app.update()
+    mp.undo()
     assert asked and "Slot1/" in asked[0]
     assert not app.errors, app.errors

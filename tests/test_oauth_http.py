@@ -40,14 +40,26 @@ def test_login_flow(tmp_path, monkeypatch):
         return FakeResp(200, {"access_token": "A2", "refresh_token": "REFRESH-SEGRETO-ROTATO", "expires_in": 3600})
     monkeypatch.setattr(oauth.requests, "post", fake_post)
 
+    browser_errors = []
+
     def browser(url):  # il "browser" segue il redirect come farebbe l'utente
         q = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
         assert q["code_challenge_method"] == ["S256"]
         redirect = q["redirect_uri"][0].replace("localhost", "127.0.0.1")
         target = f"{redirect}/?code=CODE&state={q['state'][0]}"
-        threading.Thread(target=lambda: urllib.request.urlopen(target).read()).start()
 
-    client.login(timeout=10, open_browser=browser)
+        def follow():
+            try:  # niente proxy: è il PC stesso, come per il browser vero
+                opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+                opener.open(target, timeout=10).read()
+            except Exception as e:  # noqa: BLE001 - sennò si vedrebbe solo il timeout
+                browser_errors.append(repr(e))
+        threading.Thread(target=follow, daemon=True).start()
+
+    try:
+        client.login(timeout=10, open_browser=browser)
+    except TimeoutError:
+        raise AssertionError(f"login non completato; il browser ha visto: {browser_errors}")
     assert posted[0]["code"] == "CODE" and "code_verifier" in posted[0]
     assert client.access_token() == "A1"
     # token scaduto -> refresh, e i token restano cifrati su disco
