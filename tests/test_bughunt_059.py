@@ -77,3 +77,28 @@ def test_unreadable_subfolder_is_not_a_deletion(tmp_path, monkeypatch):
     monkeypatch.setattr(em.os, "walk", real_walk)
     b.sync_game(gb)
     assert Path(gb.path, "Slot2/sav.dat").exists()
+
+
+# 3. modificare un gioco che salva nel registro (anche solo il nome) faceva sparire le sue chiavi
+#    del registro: da lì il registro non veniva più salvato, senza nessun avviso
+def test_editing_game_keeps_registry_keys(tmp_path, monkeypatch):
+    import types
+    gui = pytest.importorskip("resosync.gui")
+
+    class Var:
+        def __init__(self, v):
+            self.v = v
+
+        def get(self):
+            return self.v
+    key = "HKEY_CURRENT_USER/Software/Studio/Gioco"
+    old = Game("g", "Gioco", str(tmp_path), registry=[key], group_by="folder")
+    saved = []
+    dlg = types.SimpleNamespace(
+        game=old, name=Var("Gioco (rinominato)"), path=Var(str(tmp_path)),
+        patterns=Var("*"), excludes=Var(""), enabled=Var(True), process=Var(""),
+        launch=Var(""), install_dir=Var(""), mode=Var("sync"), max_mb=Var("0"),
+        group_by=Var("Una sottocartella"), group_labels={"folder": "Una sottocartella"},
+        on_save=lambda o, n: saved.append(n) or True, destroy=lambda: None)
+    gui.GameDialog._save(dlg)
+    assert saved and saved[0].registry == [key]

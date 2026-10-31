@@ -721,7 +721,9 @@ class GameDialog(tk.Toplevel):
                     install_dir=self.install_dir.get().strip(), mode=self.mode.get(),
                     max_cloud_mb=max_mb,
                     group_by=next(k for k, v in self.group_labels.items()
-                                  if v == self.group_by.get()))
+                                  if v == self.group_by.get()),
+                    # campi che la finestra non mostra: si tengono com'erano
+                    registry=list(self.game.registry) if self.game else [])
         if not Path(path).exists() and not messagebox.askyesno(
                 "Cartella inesistente", "La cartella non esiste: crearla e scaricarci i salvataggi "
                 "dal cloud?", parent=self):
