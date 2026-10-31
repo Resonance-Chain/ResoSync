@@ -144,8 +144,12 @@ def test_every_window_opens_without_errors(app):
 
 def test_login_works_with_window_open(app, tmp_path, monkeypatch):
     """Il login a OneDrive / Google parte dalla finestra aperta: il ritorno dal browser (una
-    richiesta a 127.0.0.1) deve arrivare anche con l'app che gira."""
+    richiesta a 127.0.0.1) deve arrivare anche con l'app che gira. Se non arriva, il messaggio
+    dice cosa ha visto il server e dove era fermo ogni thread."""
+    import http.server
+    import sys
     import threading
+    import traceback
     import urllib.parse
     import urllib.request
     from resosync import oauth
@@ -154,8 +158,26 @@ def test_login_works_with_window_open(app, tmp_path, monkeypatch):
 
     monkeypatch.setattr(oauth.requests, "post", lambda url, data, timeout: FakeResp(
         200, {"access_token": "A1", "refresh_token": "R1", "expires_in": 3600}))
+    events, t0 = [], time.time()
+
+    def ev(what):
+        events.append(f"{time.time() - t0:5.2f}s [{threading.current_thread().name}] {what}")
+
+    class Server(http.server.HTTPServer):
+        def server_bind(self):
+            ev("server: bind")
+            super().server_bind()
+            ev(f"server: in ascolto su {self.server_address}")
+
+        def get_request(self):
+            conn = super().get_request()
+            ev(f"server: connessione accettata da {conn[1]}")
+            return conn
+
+        def handle_error(self, request, client_address):
+            ev("server: errore " + traceback.format_exc().strip().splitlines()[-1])
+    monkeypatch.setattr(oauth.http.server, "HTTPServer", Server)
     client = oauth.OAuthClient("onedrive", "cid", Vault(tmp_path / "vault"))
-    seen = []
 
     def browser(url):
         q = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
@@ -164,16 +186,28 @@ def test_login_works_with_window_open(app, tmp_path, monkeypatch):
 
         def follow():
             try:
+                ev(f"browser: apro {target}")
                 opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
                 opener.open(target, timeout=10).read()
+                ev("browser: risposta ricevuta")
             except Exception as e:  # noqa: BLE001
-                seen.append(repr(e))
-        threading.Thread(target=follow, daemon=True).start()
+                ev(f"browser: errore {e!r}")
+        threading.Thread(target=follow, name="browser", daemon=True).start()
+
+    def stacks():
+        ev("dove sono i thread a metà attesa:")
+        names = {t.ident: t.name for t in threading.enumerate()}
+        for ident, frame in sys._current_frames().items():
+            where = " <- ".join(f"{Path(f.filename).name}:{f.lineno} {f.name}"
+                                for f in reversed(traceback.extract_stack(frame)[-4:]))
+            events.append(f"      {names.get(ident, ident)}: {where}")
+    threading.Timer(5, stacks).start()
     done = {}
-    t = threading.Thread(target=lambda: done.setdefault("r", _try(client.login, 10, browser)))
+    t = threading.Thread(target=lambda: done.setdefault("r", _try(client.login, 10, browser)),
+                         name="login")
     t.start()
     pump(app, lambda: not t.is_alive(), 15)  # la finestra resta viva mentre aspetta
-    assert done.get("r") is None, f"login non riuscito: {done.get('r')}, browser: {seen}"
+    assert done.get("r") is None, f"login non riuscito: {done.get('r')}\n" + "\n".join(events)
     assert client.access_token() == "A1"
 
 

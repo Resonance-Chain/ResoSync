@@ -47,14 +47,26 @@ jobs:
           SIM_STEPS_THREE: "250"  # i runner di GitHub sono più lenti: sessioni più corte
       # La prova dell'interfaccia gira in un processo a parte: apre l'app vera e niente di quello
       # che lascia (thread, Tk) deve poter disturbare gli altri test
+      # Se fallisce, la fine dell'output di pytest diventa un avviso leggibile nella pagina
+      # del run (gli errori nella preparazione dell'app non producono avvisi da soli)
       - name: Prova dell'interfaccia (Windows)
         if: runner.os == 'Windows'
-        run: python -m pytest -v --timeout=300 tests/test_gui_smoke.py
+        shell: bash
+        run: |
+          python -m pytest -v --timeout=300 tests/test_gui_smoke.py > gui.txt 2>&1 || {
+            cat gui.txt
+            echo "::error title=Prova dell'interfaccia::$(tail -c 6000 gui.txt | sed -e ':a;N;$!ba' -e 's/%/%25/g;s/\r/%0D/g;s/\n/%0A/g')"
+            exit 1; }
+          cat gui.txt
       - name: Prova dell'interfaccia con un display virtuale (Linux)
         if: runner.os == 'Linux'
         run: |
-          sudo apt-get install -y xvfb
-          xvfb-run -a python -m pytest -v --timeout=300 tests/test_gui_smoke.py
+          sudo apt-get update -q && sudo apt-get install -y -q xvfb
+          xvfb-run -a python -m pytest -v --timeout=300 tests/test_gui_smoke.py > gui.txt 2>&1 || {
+            cat gui.txt
+            echo "::error title=Prova dell'interfaccia::$(tail -c 6000 gui.txt | sed -e ':a;N;$!ba' -e 's/%/%25/g;s/\r/%0D/g;s/\n/%0A/g')"
+            exit 1; }
+          cat gui.txt
 
   windows:
     needs: test
